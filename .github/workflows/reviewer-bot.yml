@@ -2,7 +2,7 @@ name: reviewer-bot
 
 on:
   schedule:
-    - cron: "2-59/5 * * * *"     # 2분, 7분, 12분, …, 57분 (정각 부하 회피)
+    - cron: "2-59/5 * * * *"  # 2분, 7분, 12분, …, 57분 (정각 부하 회피)
   workflow_dispatch: {}
 
 permissions:
@@ -236,7 +236,7 @@ jobs:
               for u in $POOL; do
                 [ -z "$u" ] && continue
                 echo " $EXC " | grep -qw " $u " && continue
-                [ "$u" = "$ASSIGN​EE" ] && continue
+                [ "$u" = "$ASSIGNEE" ] && continue
                 CAND+=("$u")
               done
               SEL=()
