@@ -68,6 +68,8 @@ jobs:
             [ -z "$KEY" ] && continue
             echo "::group::Process project = $KEY"
 
+            PROJECT_ID=""   # ← 추가: 루프마다 PROJECT_ID 초기화
+
             CFG=".github/config/${{ env.BOT_NAME }}/${KEY}.yml"
             ST="state/${{ env.BOT_NAME }}/${KEY}.json"
             mkdir -p state/${{ env.BOT_NAME }}
@@ -122,8 +124,14 @@ jobs:
                       id
                       content{
                         __typename
-                        ... on Issue       { id number url repository { nameWithOwner } }
-                        ... on PullRequest { id number url repository { nameWithOwner } }
+                        ... on Issue {
+                          id number title url
+                          repository { nameWithOwner }
+                        }
+                        ... on PullRequest {
+                          id number title url
+                          repository { nameWithOwner }
+                        }
                       }
                       fieldValues(first:50){
                         nodes{
@@ -194,36 +202,61 @@ jobs:
             echo "[DBG] RV_FIELD_ID=${RV_FIELD_ID}  LA_FIELD_ID=${LA_FIELD_ID}"
 
             # ---[DEBUG 3] 아이템 스냅샷 (id, Status, Reviewers(auto), Assignee, Type, URL) ---
-            echo "[DBG] --- Project snapshot (id, status, reviewers, assignee, type, url) ---"
+            echo "[DBG] --- Project snapshot (id, title, status, reviewers, assignee, type, url) ---"
             jq -r '
               .data.node.items.nodes[]
               | {
                   id,
-                  status:   (.fieldValues.nodes
+                  title:     (.content.title // ""),
+                  status:    (.fieldValues.nodes
                               | map(select(.field.name=="Status"))
                               | (.[0].name // "")),
-                  reviewers:(.fieldValues.nodes
+                  reviewers: (.fieldValues.nodes
                               | map(select(.field.name=="Reviewers(auto)"))
                               | (.[0].text // "")),
-                  assignee: (
+                  assignee:  (
                               (.fieldValues.nodes
                                   | map(select(.field.name=="Assignee"))
                                   | (.[0].users.nodes[0].login // empty))
-                            //  (.fieldValues.nodes
+                            // (.fieldValues.nodes
                                   | map(select(.field.name=="Assignees"))
                                   | (.[0].users.nodes[0].login // empty))
-                            //  ""
+                            // ""
                             ),
-                  type:     (.content.__typename // ""),
-                  url:      (.content.url // "")
+                  type:      (.content.__typename // ""),
+                  url:       (.content.url // "")
                 }
-              | [ .id, .status, .reviewers, .assignee, .type, .url ]
+              | [ .id, .title, .status, .reviewers, .assignee, .type, .url ]
               | @tsv
             ' proj.json | awk -F'\t' 'BEGIN{
-              printf "ID\tSTATUS\tRV(auto)\tASSIGNEE\tTYPE\tURL\n"
-            }{
-              print
-            }'
+              printf "ID\tTITLE\tSTATUS\tRV(auto)\tASSIGNEE\tTYPE\tURL\n"
+            }{ print }'
+
+            echo "[DBG] --- Per-item fieldValues summary (field=value) ---"
+            jq -r '
+              .data.node.items.nodes[]
+              | {
+                  id,
+                  title: (.content.title // ""),
+                  pairs: (
+                    .fieldValues.nodes
+                    | map(
+                        . as $v
+                        | "\($v.field.name)="
+                          + ( if $v.__typename=="ProjectV2ItemFieldSingleSelectValue" then ($v.name // "")
+                              elif $v.__typename=="ProjectV2ItemFieldTextValue" then ($v.text // "")
+                              elif $v.__typename=="ProjectV2ItemFieldUserValue" then
+                                  ( ($v.users.nodes | map(.login) | join(",")) // "" )
+                              else ""
+                            end )
+                      )
+                    | join("; ")
+                  )
+                }
+              | "\(.id)\t\(.title)\t\(.pairs)"
+            ' proj.json | awk -F'\t' 'BEGIN{
+              printf "ID\tTITLE\tFIELDS\n"
+            }{ print }'
 
             # 필드 ID 캐시
             RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' proj.json)
@@ -353,22 +386,13 @@ jobs:
                 fi
               done
 
-              # ── ① Reviewers(auto) 업데이트 (stdin JSON)
+              # ── Reviewers(auto) 업데이트 (stdin JSON)
               jq -nc \
                 --arg q "$M" \
                 --arg pid  "$PROJECT_ID" \
                 --arg item "$ITEM_ID" \
                 --arg fid  "$RV_FIELD_ID" \
                 --arg text "$REV" \
-                '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, text:$text}}' \
-              | gh api graphql --input - >/dev/null
-
-              # ── ② Last Action 업데이트 (stdin JSON)
-              jq -nc \
-                --arg q "$M" \
-                --arg pid  "$PROJECT_ID" \
-                --arg item "$ITEM_ID" \
-                --arg text "$LA" \
                 '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, text:$text}}' \
               | gh api graphql --input - >/dev/null
 
