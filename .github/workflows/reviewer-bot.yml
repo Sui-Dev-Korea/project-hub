@@ -97,7 +97,7 @@ jobs:
             POOL=$(yq -r '(.eligible_pool // [])[]? // ""' "$CFG" | tr '\n' ' ')
             EXC=$(yq -r '(.exclude_rules // [])[]? // ""' "$CFG" | tr '\n' ' ')
             READY_FIELD=$(yq -r '.ready_field_name // "Status"' "$CFG")
-            READY_JSON=$(yq -c '.ready_values // ["Ready"]' "$CFG")
+            READY_JSON=$(yq -o=json '.ready_values // ["Ready"]' "$CFG")
 
             echo "[DBG] KEY=$KEY"
             echo "[DBG] PROJECT_ID=${PROJECT_ID}"
