@@ -160,14 +160,10 @@ jobs:
 
             # 필드 ID 캐시
             RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' proj.json)
-            LA_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Last Action") | .id' proj.json)
-
-            echo "[DBG] RV_FIELD_ID=${RV_FIELD_ID}  LA_FIELD_ID=${LA_FIELD_ID}"
 
             # 필드 없으면 스킵(원하면 자동 생성 로직으로 확장 가능)
-            if [ -z "$RV_FIELD_ID" ] || [ -z "$LA_FIELD_ID" ]; then
-              echo "WARN: Required fields missing (Reviewers(auto)/Last Action). Skip $KEY"
-              echo "::endgroup::"
+            if [ -z "$RV_FIELD_ID" ]; then
+              echo "WARN: Required field missing (Reviewers(auto)). Skip $KEY"
               continue
             fi
 
@@ -281,7 +277,8 @@ jobs:
 
               # ── 공통 뮤테이션(한 줄) + 필수 변수 가드
               M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}){clientMutationId}}'
-              for vname in PROJECT_ID ITEM_ID RV_FIELD_ID LA_FIELD_ID; do
+              # 필수: PROJECT_ID, ITEM_ID, RV_FIELD_ID 만 체크
+              for vname in PROJECT_ID ITEM_ID RV_FIELD_ID; do
                 eval "v=\${$vname}"
                 if [ -z "$v" ]; then
                   echo "FATAL: $vname is empty" >&2
@@ -304,7 +301,6 @@ jobs:
                 --arg q "$M" \
                 --arg pid  "$PROJECT_ID" \
                 --arg item "$ITEM_ID" \
-                --arg fid  "$LA_FIELD_ID" \
                 --arg text "$LA" \
                 '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, text:$text}}' \
               | gh api graphql --input - >/dev/null
