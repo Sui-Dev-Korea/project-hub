@@ -31,10 +31,14 @@ jobs:
           chmod +x /usr/local/bin/yq
       - name: Install GitHub CLI
         run: |
-          type -p gh >/dev/null || sudo apt-get update -y
-          type -p gh >/dev/null || sudo apt-get install -y gh
-          # GH_TOKEN 폴백
-          [ -z "$GH_TOKEN" ] && export GH_TOKEN="${GITHUB_TOKEN}"
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y gh
+          fi
+          # GH_TOKEN 폴백 (이미 있으면 건드리지 않음)
+          if [ -z "${GH_TOKEN:-}" ]; then
+            export GH_TOKEN="${GITHUB_TOKEN}"
+          fi
 
       # 1) 관리 중인 프로젝트(config/reviewer/*.yml) 전체 추출
       - name: Find managed projects
