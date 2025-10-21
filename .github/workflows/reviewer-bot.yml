@@ -196,18 +196,22 @@ jobs:
               | {
                   id,
                   title:     (.content.title // ""),
-                  status: (.fieldValues.nodes
-                              | map(select((.field.name? // "") | test("(?i)^status\\s*$")))
+                  status:    (.fieldValues.nodes
+                              | map(select((.field? // null) and (.field.name?)))
+                              | map(select((.field.name | tostring) | test("(?i)^status\\s*$")))
                               | (.[0].name // "")),
                   reviewers: (.fieldValues.nodes
-                              | map(select(.field.name=="Reviewers(auto)"))
+                              | map(select((.field? // null) and (.field.name?)))
+                              | map(select((.field.name | tostring) | test("(?i)^reviewers\\(auto\\)\\s*$")))
                               | (.[0].text // "")),
                   assignee:  (
                               (.fieldValues.nodes
-                                  | map(select(.field.name=="Assignee"))
+                                  | map(select((.field? // null) and (.field.name?)))
+                                  | map(select((.field.name | tostring) | test("(?i)^assignee\\s*$")))
                                   | (.[0].users.nodes[0].login // empty))
                             // (.fieldValues.nodes
-                                  | map(select(.field.name=="Assignees"))
+                                  | map(select((.field? // null) and (.field.name?)))
+                                  | map(select((.field.name | tostring) | test("(?i)^assignees\\s*$")))
                                   | (.[0].users.nodes[0].login // empty))
                             // ""
                             ),
@@ -230,13 +234,11 @@ jobs:
                     .fieldValues.nodes
                     | map(
                         . as $v
-                        | "\($v.field.name)="
-                          + ( if $v.__typename=="ProjectV2ItemFieldSingleSelectValue" then ($v.name // "")
-                              elif $v.__typename=="ProjectV2ItemFieldTextValue" then ($v.text // "")
-                              elif $v.__typename=="ProjectV2ItemFieldUserValue" then
-                                  ( ($v.users.nodes | map(.login) | join(",")) // "" )
-                              else ""
-                            end )
+                        | ((($v.field.name? // "<no-field>") | tostring) + "=") +
+                          ( if $v.__typename=="ProjectV2ItemFieldSingleSelectValue" then ($v.name // "")
+                            elif $v.__typename=="ProjectV2ItemFieldTextValue"        then ($v.text // "")
+                            elif $v.__typename=="ProjectV2ItemFieldUserValue"        then ( ($v.users.nodes | map(.login) | join(",")) // "" )
+                            else "" end )
                       )
                     | join("; ")
                   )
@@ -275,13 +277,26 @@ jobs:
 
             # 2-2) 대상 아이템 추출 (Status=Ready & Reviewers(auto) empty & 미처리)
             jq -r --argjson done "$PROCESSED" '
-              .data.node.items.nodes[]
-              | {id, content: .content, fields: .fieldValues.nodes}
-              | select(.id as $id | ($done | index($id)) | not)
-              | select([.fields[] | select(.field.name | test("(?i)^status\\s*$")) | .name] | index("Ready"))
-              | select(([.fields[] | select(.field.name=="Reviewers(auto)") | .text] | .[0]) == null or
-                       ([.fields[] | select(.field.name=="Reviewers(auto)") | .text] | .[0]) == "")
-              | @base64
+            .data.node.items.nodes[]
+            | {id, content: .content, fields: .fieldValues.nodes}
+            | select(.id as $id | ($done | index($id)) | not)
+            | select([
+                .fields[]
+                | select((.field? // null) and (.field.name?))
+                | select((.field.name | tostring) | test("(?i)^status\\s*$"))
+                | .name
+              ] | map(ascii_downcase) | index("ready"))
+            | select((
+                [.fields[]
+                | select((.field? // null) and (.field.name?))
+                | select((.field.name | tostring) | test("(?i)^reviewers\\(auto\\)\\s*$"))
+                | .text] | .[0]) == null or
+                (
+                  [.fields[]
+                  | select((.field? // null) and (.field.name?))
+                  | select((.field.name | tostring) | test("(?i)^reviewers\\(auto\\)\\s*$"))
+                  | .text] | .[0]) == "")
+            | @base64
             ' proj.json > items.b64
 
             if [ ! -s items.b64 ]; then
