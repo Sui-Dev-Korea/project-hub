@@ -203,16 +203,18 @@ jobs:
               | ($it.content.url // "") as $url
               | $it.fieldValues.nodes[]
               | {
-                  item_id:   $id,
-                  title:     $title,
-                  type:      $ctype,
-                  url:       $url,
+                  item_id:      $id,
+                  title:        $title,
+                  type:         $ctype,
+                  url:          $url,
                   value_typename: .__typename,
-                  field_id:   (.field.id   // null),
-                  field_name: (.field.name // null),
-                  select_name: (.name // null),
-                  text:       (.text // null),
-                  users: (try .users.nodes | map(.login) catch [])
+                  field_id:     (.field.id   // null),
+                  field_name:   (.field.name // null),
+                  select_name:  (.name // null),
+                  text:         (.text // null),
+                  users:        ( if (.users? and .users.nodes?)
+                                  then (.users.nodes | map(.login))
+                                  else [] end )
                 }
               | @json
             ' proj.json
