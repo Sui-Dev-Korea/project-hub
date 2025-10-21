@@ -68,7 +68,7 @@ jobs:
             [ -z "$KEY" ] && continue
             echo "::group::Process project = $KEY"
 
-            PROJECT_ID=""   # ← 추가: 루프마다 PROJECT_ID 초기화
+            PROJECT_ID=""   # ← 루프마다 초기화
 
             CFG=".github/config/${{ env.BOT_NAME }}/${KEY}.yml"
             ST="state/${{ env.BOT_NAME }}/${KEY}.json"
@@ -103,13 +103,7 @@ jobs:
             echo "[DBG] POOL=(${POOL})"
             echo "[DBG] EXC=(${EXC})"
 
-            if [ -z "$PROJECT_ID" ]; then
-              echo "WARN: $KEY has no project_id (PVT_...). Skip."
-              echo "::endgroup::"
-              continue
-            fi
-
-            # 2-1) Ready + Reviewers(auto) 비어있는 카드 조회
+            # 2-1) 프로젝트 스냅샷 조회
             READ_Q='query($pid:ID!){
               node(id:$pid){
                 ... on ProjectV2{
@@ -156,17 +150,15 @@ jobs:
               }
             }'
 
-            # JSON 바디로 전달 (개행/특수문자 안전)
             if ! jq -nc --arg q "$READ_Q" --arg pid "$PROJECT_ID" \
               '{query:$q, variables:{pid:$pid}}' \
               | gh api graphql --input - > proj.json; then
               echo "[ERR] GraphQL fetch failed for PROJECT_ID=$PROJECT_ID"
-              # 디버깅용으로 쿼리 앞부분만 보여줌
               echo "[DBG] READ_Q(head): $(printf '%s' "$READ_Q" | head -c 300)"
               exit 1
             fi
 
-            # ---[DEBUG 1] Status/Reviewers(auto) 필드와 옵션 확인 -------------------------
+            # ---[DEBUG] 필드/옵션 확인
             FQ='query($pid:ID!){
               node(id:$pid){
                 ... on ProjectV2{
@@ -192,16 +184,12 @@ jobs:
 
             echo "[DBG] --- Status options ---"
             jq -r '.data.node.fields.nodes[]
-                  | select(.name=="Status" and .__typename=="ProjectV2SingleSelectField")
+                  | select(.name | test("(?i)^status\\s*$"))        # 대소문자/공백 허용
+                  | select(.__typename=="ProjectV2SingleSelectField")
                   | .options[].name' fields.json \
               | sed 's/^/  - /' || true
 
-            # ---[DEBUG 2] 필드 ID 캐시 찍어보기 -----------------------------------------
-            RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' proj.json)
-            LA_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Last Action")     | .id' proj.json)
-            echo "[DBG] RV_FIELD_ID=${RV_FIELD_ID}  LA_FIELD_ID=${LA_FIELD_ID}"
-
-            # ---[DEBUG 3] 아이템 스냅샷 (id, Status, Reviewers(auto), Assignee, Type, URL) ---
+            # --- 아이템 스냅샷 출력 (Status 대소문자/공백 허용)
             echo "[DBG] --- Project snapshot (id, title, status, reviewers, assignee, type, url) ---"
             jq -r '
               .data.node.items.nodes[]
@@ -209,7 +197,7 @@ jobs:
                   id,
                   title:     (.content.title // ""),
                   status:    (.fieldValues.nodes
-                              | map(select(.field.name=="Status"))
+                              | map(select(.field.name | test("(?i)^status\\s*$")))
                               | (.[0].name // "")),
                   reviewers: (.fieldValues.nodes
                               | map(select(.field.name=="Reviewers(auto)"))
@@ -260,10 +248,11 @@ jobs:
 
             # 필드 ID 캐시
             RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' proj.json)
+            echo "[DBG] RV_FIELD_ID=${RV_FIELD_ID}"
 
-            # 필드 없으면 스킵(원하면 자동 생성 로직으로 확장 가능)
             if [ -z "$RV_FIELD_ID" ]; then
               echo "WARN: Required field missing (Reviewers(auto)). Skip $KEY"
+              echo "::endgroup::"
               continue
             fi
 
@@ -284,12 +273,12 @@ jobs:
 
             PROCESSED=$(jq -c '.processed_card_ids' "$ST")
 
-            # 2-2) 대상 아이템 추출 (Status Ready & Reviewers(auto) empty & 미처리)
+            # 2-2) 대상 아이템 추출 (Status=Ready & Reviewers(auto) empty & 미처리)
             jq -r --argjson done "$PROCESSED" '
               .data.node.items.nodes[]
               | {id, content: .content, fields: .fieldValues.nodes}
               | select(.id as $id | ($done | index($id)) | not)
-              | select([.fields[] | select(.field.name=="Status") | .name] | index("Ready"))
+              | select([.fields[] | select(.field.name | test("(?i)^status\\s*$")) | .name] | index("Ready"))
               | select(([.fields[] | select(.field.name=="Reviewers(auto)") | .text] | .[0]) == null or
                        ([.fields[] | select(.field.name=="Reviewers(auto)") | .text] | .[0]) == "")
               | @base64
@@ -333,7 +322,7 @@ jobs:
                 [ "$USED" -lt "$QUOTA" ] && SEL+=("$u")
               done
 
-              # 최종 픽 (1~REVIEWERS_NEEDED, 1명만 되어도 정상)
+              # 최종 픽 (1~REVIEWERS_NEEDED)
               PICKS=()
               for u in "${SEL[@]}"; do
                 PICKS+=("$u")
@@ -358,26 +347,19 @@ jobs:
                   fi
                   gh issue comment "$NUM" -b "$MSG" >/dev/null || true
                 fi
-                # 실패도 처리 기록을 추가하려면 아래 줄 주석 해제
-                # jq --arg id "$ITEM_ID" '.processed_card_ids |= ( . + [$id] | unique )' "$ST" > _st.json && mv _st.json "$ST"
                 continue
               fi
 
-              # 필드 업데이트 (Reviewers(auto), Last Action)
+              # 필드 업데이트 (Reviewers(auto))
               if [ $COUNT -eq 1 ]; then
                 REV="@${PICKS[0]}"
-                LA="OK_ASSIGNED: @${PICKS[0]}"
               else
                 REV="@${PICKS[0]}, @${PICKS[1]}"
-                LA="OK_ASSIGNED: @${PICKS[0]}, @${PICKS[1]}"
               fi
 
               echo "[DBG][ASSIGN] REV=${REV}"
-              echo "[DBG][ASSIGN] LA=${LA}"
 
-              # ── 공통 뮤테이션(한 줄) + 필수 변수 가드
               M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}){clientMutationId}}'
-              # 필수: PROJECT_ID, ITEM_ID, RV_FIELD_ID 만 체크
               for vname in PROJECT_ID ITEM_ID RV_FIELD_ID; do
                 eval "v=\${$vname}"
                 if [ -z "$v" ]; then
@@ -386,7 +368,6 @@ jobs:
                 fi
               done
 
-              # ── Reviewers(auto) 업데이트 (stdin JSON)
               jq -nc \
                 --arg q "$M" \
                 --arg pid  "$PROJECT_ID" \
@@ -396,7 +377,7 @@ jobs:
                 '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, text:$text}}' \
               | gh api graphql --input - >/dev/null
 
-              # 코멘트(멘션) — append-only
+              # 코멘트(멘션)
               NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
               MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정: $REV\n- 스프린트: $SPRINT\n- 쿼터: $QUOTA/인"
               if [ "$CTYPE" = "Issue" ] || [ "$CTYPE" = "PullRequest" ]; then
@@ -410,7 +391,7 @@ jobs:
                 gh issue comment "$NUM" -b "$MSG" >/dev/null || true
               fi
 
-              # state 업데이트 (쿼터/processed/timestamp)
+              # state 업데이트
               if [ $COUNT -ge 1 ]; then
                 P0="${PICKS[0]}"
                 jq --arg u "$P0" '.quota_usage[$u] = ((.quota_usage[$u] // 0) + 1)' "$ST" > _st.json && mv _st.json "$ST"
