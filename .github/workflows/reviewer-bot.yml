@@ -2,7 +2,7 @@ name: reviewer-bot
 
 on:
   schedule:
-    - cron: "2-59/5 * * * *"  # 2분,7분,12분,…,57분
+    - cron: "2-59/5 * * * *"  # 2분, 7분, 12분, …, 57분 (정각 부하 회피)
   workflow_dispatch: {}        # 수동 실행
 
 permissions:
@@ -13,7 +13,8 @@ permissions:
 env:
   TZ: Asia/Seoul
   BOT_NAME: reviewer
-  GH_TOKEN: ${{ github.token }} 
+  GH_TOKEN: ${{ github.token }}   # 기본 제공 토큰 사용 (필요 시 secrets.BOT_TOKEN으로 교체)
+  # DEBUG: "1"                    # <- 디버그 상세로그 켜려면 주석 해제
 
 jobs:
   assign-reviewers:
@@ -29,6 +30,7 @@ jobs:
           sudo apt-get install -y jq
           curl -sSL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
           chmod +x /usr/local/bin/yq
+
       - name: Install GitHub CLI
         run: |
           if ! command -v gh >/dev/null 2>&1; then
@@ -55,7 +57,13 @@ jobs:
       - name: Loop over projects
         if: ${{ steps.list.outputs.count != '0' }}
         run: |
+          # ── 디버그 스위치
+          if [ "${DEBUG:-0}" = "1" ]; then
+            set -x
+          fi
           set -e
+          set -o pipefail
+
           while read -r KEY; do
             [ -z "$KEY" ] && continue
             echo "::group::Process project = $KEY"
@@ -72,19 +80,27 @@ jobs:
             POOL=$(yq -r '(.eligible_pool // [])[]? // ""' "$CFG" | tr '\n' ' ')
             EXC=$(yq -r '(.exclude_rules // [])[]? // ""' "$CFG" | tr '\n' ' ')
 
+            echo "[DBG] KEY=$KEY"
+            echo "[DBG] PROJECT_ID=${PROJECT_ID}"
+            echo "[DBG] REVIEWERS_NEEDED=${REVIEWERS_NEEDED} QUOTA=${QUOTA} SPRINT=${SPRINT}"
+            echo "[DBG] POOL=(${POOL})"
+            echo "[DBG] EXC=(${EXC})"
+
             if [ -z "$PROJECT_ID" ]; then
               echo "WARN: $KEY has no project_id (PVT_...). Skip."
               echo "::endgroup::"
               continue
             fi
 
-            # 2-1) 이 프로젝트에서 Ready + Reviewers(auto) 빈 카드 목록 조회
+            # 2-1) Ready + Reviewers(auto) 비어있는 카드 조회
             Q='query($pid:ID!){node(id:$pid){... on ProjectV2 {items(first:100){nodes{id content{__typename ... on Issue {id number url repository {nameWithOwner}} ... on PullRequest {id number url repository {nameWithOwner}}} fieldValues(first:50){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue {field{... on ProjectV2Field {id name}} name} ... on ProjectV2ItemFieldTextValue {field{... on ProjectV2Field {id name}} text} ... on ProjectV2ItemFieldUserValue {field{... on ProjectV2Field {id name}} users(first:10){nodes{login}}}}}} fields(first:50){nodes {id name dataType}}}}}'
             gh api graphql -f query="$Q" -F pid="$PROJECT_ID" > proj.json
 
             # 필드 ID 캐시
             RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' proj.json)
             LA_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Last Action") | .id' proj.json)
+
+            echo "[DBG] RV_FIELD_ID=${RV_FIELD_ID}  LA_FIELD_ID=${LA_FIELD_ID}"
 
             # 필드 없으면 스킵(원하면 자동 생성 로직으로 확장 가능)
             if [ -z "$RV_FIELD_ID" ] || [ -z "$LA_FIELD_ID" ]; then
@@ -110,7 +126,7 @@ jobs:
 
             PROCESSED=$(jq -c '.processed_card_ids' "$ST")
 
-            # 2-2) 처리 대상 아이템 추출 (Status == Ready AND Reviewers(auto) empty AND state 미처리)
+            # 2-2) 대상 아이템 추출 (Status Ready & Reviewers(auto) empty & 미처리)
             jq -r --argjson done "$PROCESSED" '
               .data.node.items.nodes[]
               | {id, content: .content, fields: .fieldValues.nodes}
@@ -141,6 +157,8 @@ jobs:
               ISSUE_URL=$(echo "$J" | jq -r '.content.url // ""')
               REPO_NWO=$(echo "$J" | jq -r '.content.repository.nameWithOwner // ""')
 
+              echo "[DBG][ITEM] ITEM_ID=${ITEM_ID} CTYPE=${CTYPE} REPO_NWO=${REPO_NWO} ISSUE_URL=${ISSUE_URL} ASSIGNEE=${ASSIGNEE}"
+
               # 후보 풀 구성 (제외 규칙 적용)
               CAND=()
               for u in $POOL; do
@@ -165,6 +183,10 @@ jobs:
               done
 
               COUNT=${#PICKS[@]}
+              echo "[DBG][ITEM] CAND=(${CAND[*]})"
+              echo "[DBG][ITEM] SEL =(${SEL[*]})"
+              echo "[DBG][ITEM] PICKS=(${PICKS[*]}) COUNT=${COUNT}"
+
               if [ $COUNT -eq 0 ]; then
                 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
                 MSG="❌ [AUTO][$NOW][$KEY] 리뷰어를 배정할 수 없습니다.\n- 사유: 후보 풀 전원 쿼터 초과/제외 규칙 충돌\n- 조치: 풀 확장 또는 쿼터 상향 후 Backlog→Ready로 재시도"
@@ -192,7 +214,11 @@ jobs:
                 LA="OK_ASSIGNED: @${PICKS[0]}, @${PICKS[1]}"
               fi
 
-              # ── 가드: 필수 변수 비어있으면 중단(원인 파악 쉬움)
+              echo "[DBG][ASSIGN] REV=${REV}"
+              echo "[DBG][ASSIGN] LA=${LA}"
+
+              # ── 공통 뮤테이션(한 줄) + 필수 변수 가드
+              M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}){clientMutationId}}'
               for vname in PROJECT_ID ITEM_ID RV_FIELD_ID LA_FIELD_ID; do
                 eval "v=\${$vname}"
                 if [ -z "$v" ]; then
@@ -201,28 +227,25 @@ jobs:
                 fi
               done
 
-              # ── ① Reviewers(auto) 업데이트
-              M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}){clientMutationId}}'
-              gh api graphql \
-                -f query="$M" \
-                -f variables="$(jq -nc \
-                    --arg pid  "$PROJECT_ID" \
-                    --arg item "$ITEM_ID" \
-                    --arg fid  "$RV_FIELD_ID" \
-                    --arg text "$REV" \
-                    '{pid:$pid,item:$item,fid:$fid,text:$text}')" \
-                >/dev/null
+              # ── ① Reviewers(auto) 업데이트 (stdin JSON)
+              jq -nc \
+                --arg q "$M" \
+                --arg pid  "$PROJECT_ID" \
+                --arg item "$ITEM_ID" \
+                --arg fid  "$RV_FIELD_ID" \
+                --arg text "$REV" \
+                '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, text:$text}}' \
+              | gh api graphql --input - >/dev/null
 
-              # ── ② Last Action 업데이트
-              gh api graphql \
-                -f query="$M" \
-                -f variables="$(jq -nc \
-                    --arg pid  "$PROJECT_ID" \
-                    --arg item "$ITEM_ID" \
-                    --arg fid  "$LA_FIELD_ID" \
-                    --arg text "$LA" \
-                    '{pid:$pid,item:$item,fid:$fid,text:$text}')" \
-                >/dev/null
+              # ── ② Last Action 업데이트 (stdin JSON)
+              jq -nc \
+                --arg q "$M" \
+                --arg pid  "$PROJECT_ID" \
+                --arg item "$ITEM_ID" \
+                --arg fid  "$LA_FIELD_ID" \
+                --arg text "$LA" \
+                '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, text:$text}}' \
+              | gh api graphql --input - >/dev/null
 
               # 코멘트(멘션) — append-only
               NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
