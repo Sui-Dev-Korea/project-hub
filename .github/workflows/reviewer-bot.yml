@@ -189,6 +189,54 @@ jobs:
                   | .options[].name' fields.json \
               | sed 's/^/  - /' || true
 
+            # [DBG A] Status 필드 ID
+            STATUS_ID=$(jq -r '.data.node.fields.nodes[] | select(.name | test("(?i)^status\\s*$")) | .id' fields.json)
+            echo "[DBG] STATUS_ID=${STATUS_ID}"
+
+            # [DBG B] RAW dump: item별 fieldValues (한 값당 한 줄 JSON)
+            echo "[DBG] --- RAW dump: fieldValues per item (one JSON per value) ---"
+            jq -r '
+              .data.node.items.nodes[] as $it
+              | ($it.id) as $id
+              | ($it.content.title // "") as $title
+              | ($it.content.__typename // "") as $ctype
+              | ($it.content.url // "") as $url
+              | $it.fieldValues.nodes[]
+              | {
+                  item_id:   $id,
+                  title:     $title,
+                  type:      $ctype,
+                  url:       $url,
+                  value_typename: .__typename,
+                  field_id:   (.field.id   // null),
+                  field_name: (.field.name // null),
+                  select_name: (.name // null),
+                  text:       (.text // null),
+                  users: (try .users.nodes | map(.login) catch [])
+                }
+              | @json
+            ' proj.json
+
+            # [DBG C] STATUS_ID로 매칭되는 값이 카드에 어떻게 붙는지
+            echo "[DBG] --- Items having fieldValues with STATUS_ID ---"
+            jq -r --arg sid "$STATUS_ID" '
+              .data.node.items.nodes[]
+              | {
+                  id,
+                  title: (.content.title // ""),
+                  status_values: (
+                    .fieldValues.nodes
+                    | map(select((.field.id? // "") == $sid))
+                    | map({
+                        value_typename: .__typename,
+                        select_name: (.name // null),
+                        text: (.text // null)
+                      })
+                  )
+                }
+              | @json
+            ' proj.json
+
             # --- 아이템 스냅샷 출력 (Status 대소문자/공백 허용)
             echo "[DBG] --- Project snapshot (id, title, status, reviewers, assignee, type, url) ---"
             jq -r '
