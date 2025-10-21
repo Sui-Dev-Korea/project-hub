@@ -158,6 +158,24 @@ jobs:
               exit 1
             fi
 
+            # ---[DEBUG 1] Status/Reviewers(auto) 필드와 옵션 확인 -------------------------
+            FQ='query($pid:ID!){
+              node(id:$pid){
+                ... on ProjectV2{
+                  fields(first:50){
+                    nodes{
+                      __typename
+                      ... on ProjectV2Field { id name dataType }
+                      ... on ProjectV2SingleSelectField { id name options { name } }
+                    }
+                  }
+                }
+              }
+            }'
+            jq -nc --arg q "$FQ" --arg pid "$PROJECT_ID" \
+              '{query:$q, variables:{pid:$pid}}' \
+            | gh api graphql --input - > fields.json
+
             echo "[DBG] --- Fields (name, type) ---"
             jq -r '.data.node.fields.nodes[]
                   | [.name, .__typename, (.dataType // "")]
