@@ -192,30 +192,35 @@ jobs:
                 LA="OK_ASSIGNED: @${PICKS[0]}, @${PICKS[1]}"
               fi
 
+              # ── 가드: 필수 변수 비어있으면 중단(원인 파악 쉬움)
+              for vname in PROJECT_ID ITEM_ID RV_FIELD_ID LA_FIELD_ID; do
+                eval "v=\${$vname}"
+                if [ -z "$v" ]; then
+                  echo "FATAL: $vname is empty" >&2
+                  exit 1
+                fi
+              done
+
+              # ── ① Reviewers(auto) 업데이트
+              M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}){clientMutationId}}'
               gh api graphql \
-                -f query='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){
-                  updateProjectV2ItemFieldValue(
-                    input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}
-                  ){ clientMutationId }
-                }' \
+                -f query="$M" \
                 -f variables="$(jq -nc \
-                    --arg pid   "$PROJECT_ID" \
-                    --arg item  "$ITEM_ID" \
-                    --arg fid   "$RV_FIELD_ID" \
-                    --arg text  "$REV" \
+                    --arg pid  "$PROJECT_ID" \
+                    --arg item "$ITEM_ID" \
+                    --arg fid  "$RV_FIELD_ID" \
+                    --arg text "$REV" \
                     '{pid:$pid,item:$item,fid:$fid,text:$text}')" \
                 >/dev/null
+
+              # ── ② Last Action 업데이트
               gh api graphql \
-                -f query='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){
-                  updateProjectV2ItemFieldValue(
-                    input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}
-                  ){ clientMutationId }
-                }' \
+                -f query="$M" \
                 -f variables="$(jq -nc \
-                    --arg pid   "$PROJECT_ID" \
-                    --arg item  "$ITEM_ID" \
-                    --arg fid   "$LA_FIELD_ID" \
-                    --arg text  "$LA" \
+                    --arg pid  "$PROJECT_ID" \
+                    --arg item "$ITEM_ID" \
+                    --arg fid  "$LA_FIELD_ID" \
+                    --arg text "$LA" \
                     '{pid:$pid,item:$item,fid:$fid,text:$text}')" \
                 >/dev/null
 
