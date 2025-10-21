@@ -2,7 +2,7 @@ name: reviewer-bot
 
 on:
   schedule:
-    - cron: "2-59/5 * * * *"  # 2분, 7분, 12분, …, 57분 (정각 부하 회피)
+    - cron: "2-59/5 * * * *"     # 2분, 7분, 12분, …, 57분 (정각 부하 회피)
   workflow_dispatch: {}
 
 permissions:
@@ -13,7 +13,7 @@ permissions:
 env:
   TZ: Asia/Seoul
   BOT_NAME: reviewer
-  GH_TOKEN: ${{ secrets.BOT_TOKEN }}   # PAT 사용 (repo/org project 접근권 포함)
+  GH_TOKEN: ${{ secrets.BOT_TOKEN }}   # gh CLI용 PAT (org projects/graphQL 접근 포함)
 
 jobs:
   assign-reviewers:
@@ -22,9 +22,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_TOKEN }}   # git push도 PAT로 수행
 
       - name: Install tools
         run: |
+          set -euo pipefail
           sudo apt-get update -y
           sudo apt-get install -y jq
           curl -sSL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
@@ -32,10 +36,12 @@ jobs:
 
       - name: Install GitHub CLI
         run: |
+          set -euo pipefail
           if ! command -v gh >/dev/null 2>&1; then
             sudo apt-get update -y
             sudo apt-get install -y gh
           fi
+          # gh CLI가 GH_TOKEN을 보고 인증하므로 환경변수 보장
           if [ -z "${GH_TOKEN:-}" ]; then
             export GH_TOKEN="${GITHUB_TOKEN}"
           fi
@@ -43,6 +49,7 @@ jobs:
       - name: Find managed projects
         id: list
         run: |
+          set -euo pipefail
           ls .github/config/${{ env.BOT_NAME }}/*.yml 2>/dev/null | sed 's#.*/##; s#\.yml$##' > projects.txt || true
           echo "count=$(wc -l < projects.txt | tr -d ' ')" >> $GITHUB_OUTPUT
 
@@ -130,7 +137,7 @@ jobs:
               '{query:$q, variables:{pid:$pid}}' \
             | gh api graphql --input - > proj.json
 
-            # ---- Status 옵션을 위해 fields만 별도 조회 (options 필요) ----
+            # ---- Status 옵션 조회 ----
             FQ='query($pid:ID!){
               node(id:$pid){
                 ... on ProjectV2{
@@ -169,7 +176,7 @@ jobs:
             if [ "$CUR" != "$SPRINT" ]; then
               jq --arg s "$SPRINT" '
                 .sprint = $s
-                | .quota_per_sprint //= 0
+                | .quota_per_sprint = '"$QUOTA"'
                 | .quota_usage = {}
                 | .processed_card_ids = []
               ' "$ST" > _st.json && mv _st.json "$ST"
@@ -229,7 +236,7 @@ jobs:
               for u in $POOL; do
                 [ -z "$u" ] && continue
                 echo " $EXC " | grep -qw " $u " && continue
-                [ "$u" = "$ASSIGNEE" ] && continue
+                [ "$u" = "$ASSIGN​EE" ] && continue
                 CAND+=("$u")
               done
               SEL=()
@@ -302,13 +309,14 @@ jobs:
 
             done < items.b64
 
-            # ---- 커밋 & 푸시 (초기 트래킹/충돌 방지 포함) ----
+            # ---- 커밋 & 푸시 (untracked 포함, PAT 사용) ----
             git config --global safe.directory "$GITHUB_WORKSPACE"
             git config user.name  "project-hub-bot"
             git config user.email "bot@users.noreply.github.com"
 
-            # state 디렉터리가 아직 트래킹 안되었으면 초기화 커밋 1회
+            # state 디렉토리 최초 트래킹
             if ! git ls-files --error-unmatch state >/dev/null 2>&1; then
+              mkdir -p state
               touch state/.gitkeep
               git add state/.gitkeep
               git commit -m "init(state): track state directory" || true
@@ -316,9 +324,11 @@ jobs:
               git push || true
             fi
 
-            # 실제 변경이 있으면 커밋/푸시
-            if ! git diff --quiet -- state/ ; then
-              git add state/
+            # 변경이 있는 경우에만 커밋/푸시
+            git add -A state/
+            if git diff --cached --quiet -- state/ ; then
+              echo "No state changes to commit"
+            else
               git commit -m "state(${KEY}): update @ ${GITHUB_RUN_ID}" || true
               git pull --rebase || true
               git push || (sleep 2 && git pull --rebase && git push) || true
