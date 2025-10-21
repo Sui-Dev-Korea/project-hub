@@ -13,7 +13,7 @@ permissions:
 env:
   TZ: Asia/Seoul
   BOT_NAME: reviewer
-  GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+  GH_TOKEN: ${{ github.token }} 
 
 jobs:
   assign-reviewers:
