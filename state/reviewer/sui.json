@@ -1,0 +1,12 @@
+{
+  "quota_usage": {
+    "nubro999": 1,
+    "devan-ko": 1
+  },
+  "processed_card_ids": [
+    "PVTI_lADODc3yn84BEdTSzgfYTME"
+  ],
+  "sprint": "2025-W43",
+  "quota_per_sprint": 8,
+  "last_run_at": "2025-10-21T19:49:55Z"
+}
