@@ -193,6 +193,15 @@ jobs:
             STATUS_ID=$(jq -r '.data.node.fields.nodes[] | select(.name | test("(?i)^status\\s*$")) | .id' fields.json)
             echo "[DBG] STATUS_ID=${STATUS_ID}"
 
+            # Status 옵션들(JSON array) 추출
+            STATUS_OPTS_JSON=$(jq -c '
+              [.data.node.fields.nodes[]
+              | select((.name|test("(?i)^status\\s*$")) and .__typename=="ProjectV2SingleSelectField")
+              | .options[].name]
+            ' fields.json)
+
+            echo "[DBG] STATUS_OPTS_JSON=${STATUS_OPTS_JSON}"
+
             # [DBG B] RAW dump: item별 fieldValues (한 값당 한 줄 JSON)
             echo "[DBG] --- RAW dump: fieldValues per item (one JSON per value) ---"
             jq -r '
@@ -241,32 +250,34 @@ jobs:
 
             # --- 아이템 스냅샷 출력 (Status 대소문자/공백 허용)
             echo "[DBG] --- Project snapshot (id, title, status, reviewers, assignee, type, url) ---"
-            jq -r '
+            jq -r --argjson sopts "${STATUS_OPTS_JSON:-[]}" '
               .data.node.items.nodes[]
               | {
                   id,
-                  title:     (.content.title // ""),
-                  status:    (.fieldValues.nodes
-                              | map(select((.field? // null) and (.field.name?)))
-                              | map(select((.field.name | tostring) | test("(?i)^status\\s*$")))
-                              | (.[0].name // "")),
-                  reviewers: (.fieldValues.nodes
-                              | map(select((.field? // null) and (.field.name?)))
-                              | map(select((.field.name | tostring) | test("(?i)^reviewers\\(auto\\)\\s*$")))
-                              | (.[0].text // "")),
-                  assignee:  (
-                              (.fieldValues.nodes
-                                  | map(select((.field? // null) and (.field.name?)))
-                                  | map(select((.field.name | tostring) | test("(?i)^assignee\\s*$")))
-                                  | (.[0].users.nodes[0].login // empty))
-                            // (.fieldValues.nodes
-                                  | map(select((.field? // null) and (.field.name?)))
-                                  | map(select((.field.name | tostring) | test("(?i)^assignees\\s*$")))
-                                  | (.[0].users.nodes[0].login // empty))
-                            // ""
-                            ),
-                  type:      (.content.__typename // ""),
-                  url:       (.content.url // "")
+                  title: (.content.title // ""),
+                  # ── Status: field=null 이어도, 옵션 이름 매칭으로 추출
+                  status: (
+                    .fieldValues.nodes
+                    | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
+                    | map(select((.name // "") as $n | ($sopts | index($n))))
+                    | (.[0].name // "")
+                  ),
+                  reviewers: (
+                    .fieldValues.nodes
+                    | map(select((.field.name? // "") | test("(?i)^reviewers\\(auto\\)\\s*$")))
+                    | (.[0].text // "")
+                  ),
+                  assignee: (
+                    (.fieldValues.nodes
+                      | map(select((.field.name? // "") | test("(?i)^assignee\\s*$")))
+                      | (.[0].users.nodes[0].login // empty))
+                    // (.fieldValues.nodes
+                      | map(select((.field.name? // "") | test("(?i)^assignees\\s*$")))
+                      | (.[0].users.nodes[0].login // empty))
+                    // ""
+                  ),
+                  type: (.content.__typename // ""),
+                  url:  (.content.url // "")
                 }
               | [ .id, .title, .status, .reviewers, .assignee, .type, .url ]
               | @tsv
@@ -326,27 +337,35 @@ jobs:
             PROCESSED=$(jq -c '.processed_card_ids' "$ST")
 
             # 2-2) 대상 아이템 추출 (Status=Ready & Reviewers(auto) empty & 미처리)
-            jq -r --argjson done "$PROCESSED" '
-            .data.node.items.nodes[]
-            | {id, content: .content, fields: .fieldValues.nodes}
-            | select(.id as $id | ($done | index($id)) | not)
-            | select([
-                .fields[]
-                | select((.field? // null) and (.field.name?))
-                | select((.field.name | tostring) | test("(?i)^status\\s*$"))
-                | .name
-              ] | map(ascii_downcase) | index("ready"))
-            | select((
-                [.fields[]
-                | select((.field? // null) and (.field.name?))
-                | select((.field.name | tostring) | test("(?i)^reviewers\\(auto\\)\\s*$"))
-                | .text] | .[0]) == null or
-                (
+            jq -r --argjson done "$PROCESSED" --argjson sopts "${STATUS_OPTS_JSON:-[]}" '
+              .data.node.items.nodes[]
+              | {id, content: .content, fields: .fieldValues.nodes}
+              | select(.id as $id | ($done | index($id)) | not)
+              # ── Status=Ready?  (옵션 이름 매칭 기반)
+              | select(
+                  (.fields
+                    | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
+                    | map(.name // "")
+                    | map(ascii_downcase)) as $vals
+                  | ($vals | index("ready"))
+                  # 위 줄이 true 인데, 그 "ready" 값이 실제 Status 옵션 안에 있어야 함
+                  and (
+                    (.fields
+                      | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
+                      | map(.name // "")) as $names
+                    | any($names[]; ($sopts | index(.)))
+                  )
+                )
+              # ── Reviewers(auto) 비었는가?
+              | select((
                   [.fields[]
-                  | select((.field? // null) and (.field.name?))
-                  | select((.field.name | tostring) | test("(?i)^reviewers\\(auto\\)\\s*$"))
-                  | .text] | .[0]) == "")
-            | @base64
+                  | select((.field.name? // "") | test("(?i)^reviewers\\(auto\\)\\s*$"))
+                  | .text] | .[0]) == null or
+                  (
+                  [.fields[]
+                    | select((.field.name? // "") | test("(?i)^reviewers\\(auto\\)\\s*$"))
+                    | .text] | .[0]) == "")
+              | @base64
             ' proj.json > items.b64
 
             if [ ! -s items.b64 ]; then
