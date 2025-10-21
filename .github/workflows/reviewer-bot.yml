@@ -93,8 +93,55 @@ jobs:
             fi
 
             # 2-1) Ready + Reviewers(auto) 비어있는 카드 조회
-            Q='query($pid:ID!){node(id:$pid){... on ProjectV2 {items(first:100){nodes{id content{__typename ... on Issue {id number url repository {nameWithOwner}} ... on PullRequest {id number url repository {nameWithOwner}}} fieldValues(first:50){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue {field{... on ProjectV2Field {id name}} name} ... on ProjectV2ItemFieldTextValue {field{... on ProjectV2Field {id name}} text} ... on ProjectV2ItemFieldUserValue {field{... on ProjectV2Field {id name}} users(first:10){nodes{login}}}}}} fields(first:50){nodes {id name dataType}}}}}'
-            gh api graphql -f query="$Q" -F pid="$PROJECT_ID" > proj.json
+            READ_Q='query($pid:ID!){
+              node(id:$pid){
+                ... on ProjectV2{
+                  fields(first:50){
+                    nodes{
+                      __typename
+                      ... on ProjectV2Field { id name dataType }
+                    }
+                  }
+                  items(first:100){
+                    nodes{
+                      id
+                      content{
+                        __typename
+                        ... on Issue       { id number url repository { nameWithOwner } }
+                        ... on PullRequest { id number url repository { nameWithOwner } }
+                      }
+                      fieldValues(first:50){
+                        nodes{
+                          __typename
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            field { ... on ProjectV2Field { id name } }
+                            name
+                          }
+                          ... on ProjectV2ItemFieldTextValue {
+                            field { ... on ProjectV2Field { id name } }
+                            text
+                          }
+                          ... on ProjectV2ItemFieldUserValue {
+                            field { ... on ProjectV2Field { id name } }
+                            users(first:10){ nodes{ login } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }'
+
+            # JSON 바디로 전달 (개행/특수문자 안전)
+            if ! jq -nc --arg q "$READ_Q" --arg pid "$PROJECT_ID" \
+              '{query:$q, variables:{pid:$pid}}' \
+              | gh api graphql --input - > proj.json; then
+              echo "[ERR] GraphQL fetch failed for PROJECT_ID=$PROJECT_ID"
+              # 디버깅용으로 쿼리 앞부분만 보여줌
+              echo "[DBG] READ_Q(head): $(printf '%s' "$READ_Q" | head -c 300)"
+              exit 1
+            fi
 
             # 필드 ID 캐시
             RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' proj.json)
