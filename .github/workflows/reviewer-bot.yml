@@ -13,7 +13,7 @@ permissions:
 env:
   TZ: Asia/Seoul
   BOT_NAME: reviewer
-  GH_TOKEN: ${{ github.token }}   # 기본 제공 토큰 사용 (필요 시 secrets.BOT_TOKEN으로 교체)
+  GH_TOKEN: ${{ secrets.BOT_TOKEN }}   # ← github.token 대신 PAT 사용
   # DEBUG: "1"                    # <- 디버그 상세로그 켜려면 주석 해제
 
 jobs:
@@ -73,7 +73,22 @@ jobs:
             mkdir -p state/${{ env.BOT_NAME }}
             [ -f "$ST" ] || echo '{}' > "$ST"
 
-            PROJECT_ID=$(yq -r '.project_id // ""' "$CFG")
+            ORG=$(yq -r '.project_org // ""' "$CFG")
+            NUM=$(yq -r '.project_number // ""' "$CFG")
+            if [ -z "$PROJECT_ID" ] && [ -n "$ORG" ] && [ -n "$NUM" ]; then
+              echo "[DBG] PROJECT_ID 비어있음 → org/number로 해석 시도"
+              Q='query($org:String!,$num:Int!){organization(login:$org){projectV2(number:$num){id title}}}'
+              PROJECT_ID=$(jq -nc --arg q "$Q" --arg org "$ORG" --argjson num "$NUM" \
+                '{query:$q,variables:{org:$org,num:$num}}' | gh api graphql --input - \
+                | jq -r '.data.organization.projectV2.id // empty')
+              echo "[DBG] PROJECT_ID 해석 결과: $PROJECT_ID"
+            fi
+
+            if [ -z "$PROJECT_ID" ]; then
+              echo "[ERR] project_org/number 로도 프로젝트 ID를 찾을 수 없습니다. ORG=$ORG NUM=$NUM"
+              exit 1
+            fi
+
             REVIEWERS_NEEDED=$(yq -r '.reviewers_needed // 2' "$CFG")
             QUOTA=$(yq -r '.quota_per_sprint // 8' "$CFG")
             SPRINT=$(yq -r '.sprint // "default-sprint"' "$CFG")
