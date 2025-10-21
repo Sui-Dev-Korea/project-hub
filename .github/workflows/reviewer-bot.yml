@@ -3,7 +3,7 @@ name: reviewer-bot
 on:
   schedule:
     - cron: "2-59/5 * * * *"  # 2분, 7분, 12분, …, 57분 (정각 부하 회피)
-  workflow_dispatch: {}        # 수동 실행
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -13,8 +13,7 @@ permissions:
 env:
   TZ: Asia/Seoul
   BOT_NAME: reviewer
-  GH_TOKEN: ${{ secrets.BOT_TOKEN }}   # ← github.token 대신 PAT 사용
-  # DEBUG: "1"                    # <- 디버그 상세로그 켜려면 주석 해제
+  GH_TOKEN: ${{ secrets.BOT_TOKEN }}   # PAT 사용 (repo/org project 접근권 포함)
 
 jobs:
   assign-reviewers:
@@ -37,12 +36,10 @@ jobs:
             sudo apt-get update -y
             sudo apt-get install -y gh
           fi
-          # GH_TOKEN 폴백 (이미 있으면 건드리지 않음)
           if [ -z "${GH_TOKEN:-}" ]; then
             export GH_TOKEN="${GITHUB_TOKEN}"
           fi
 
-      # 1) 관리 중인 프로젝트(config/reviewer/*.yml) 전체 추출
       - name: Find managed projects
         id: list
         run: |
@@ -53,41 +50,33 @@ jobs:
         if: ${{ steps.list.outputs.count == '0' }}
         run: echo "No configs under .github/config/${{ env.BOT_NAME }} — nothing to do."
 
-      # 2) 프로젝트들 순회
       - name: Loop over projects
         if: ${{ steps.list.outputs.count != '0' }}
         run: |
-          # ── 디버그 스위치
-          if [ "${DEBUG:-0}" = "1" ]; then
-            set -x
-          fi
-          set -e
-          set -o pipefail
+          set -euo pipefail
 
           while read -r KEY; do
             [ -z "$KEY" ] && continue
-            echo "::group::Process project = $KEY"
+            echo "::group::Project = $KEY"
 
-            PROJECT_ID=""   # ← 루프마다 초기화
+            PROJECT_ID=""
 
             CFG=".github/config/${{ env.BOT_NAME }}/${KEY}.yml"
             ST="state/${{ env.BOT_NAME }}/${KEY}.json"
-            mkdir -p state/${{ env.BOT_NAME }}
+            mkdir -p "state/${{ env.BOT_NAME }}"
             [ -f "$ST" ] || echo '{}' > "$ST"
 
             ORG=$(yq -r '.project_org // ""' "$CFG")
             NUM=$(yq -r '.project_number // ""' "$CFG")
             if [ -z "$PROJECT_ID" ] && [ -n "$ORG" ] && [ -n "$NUM" ]; then
-              echo "[DBG] PROJECT_ID 비어있음 → org/number로 해석 시도"
               Q='query($org:String!,$num:Int!){organization(login:$org){projectV2(number:$num){id title}}}'
               PROJECT_ID=$(jq -nc --arg q "$Q" --arg org "$ORG" --argjson num "$NUM" \
                 '{query:$q,variables:{org:$org,num:$num}}' | gh api graphql --input - \
                 | jq -r '.data.organization.projectV2.id // empty')
-              echo "[DBG] PROJECT_ID 해석 결과: $PROJECT_ID"
             fi
 
             if [ -z "$PROJECT_ID" ]; then
-              echo "[ERR] project_org/number 로도 프로젝트 ID를 찾을 수 없습니다. ORG=$ORG NUM=$NUM"
+              echo "[ERR] project_org/number 로 Project ID를 찾지 못했습니다. ORG=$ORG NUM=$NUM"
               exit 1
             fi
 
@@ -97,13 +86,7 @@ jobs:
             POOL=$(yq -r '(.eligible_pool // [])[]? // ""' "$CFG" | tr '\n' ' ')
             EXC=$(yq -r '(.exclude_rules // [])[]? // ""' "$CFG" | tr '\n' ' ')
 
-            echo "[DBG] KEY=$KEY"
-            echo "[DBG] PROJECT_ID=${PROJECT_ID}"
-            echo "[DBG] REVIEWERS_NEEDED=${REVIEWERS_NEEDED} QUOTA=${QUOTA} SPRINT=${SPRINT}"
-            echo "[DBG] POOL=(${POOL})"
-            echo "[DBG] EXC=(${EXC})"
-
-            # 2-1) 프로젝트 스냅샷 조회
+            # ---- 프로젝트 스냅샷 (필드+아이템) ----
             READ_Q='query($pid:ID!){
               node(id:$pid){
                 ... on ProjectV2{
@@ -118,14 +101,8 @@ jobs:
                       id
                       content{
                         __typename
-                        ... on Issue {
-                          id number title url
-                          repository { nameWithOwner }
-                        }
-                        ... on PullRequest {
-                          id number title url
-                          repository { nameWithOwner }
-                        }
+                        ... on Issue       { id number title url repository { nameWithOwner } }
+                        ... on PullRequest { id number title url repository { nameWithOwner } }
                       }
                       fieldValues(first:50){
                         nodes{
@@ -149,16 +126,11 @@ jobs:
                 }
               }
             }'
-
-            if ! jq -nc --arg q "$READ_Q" --arg pid "$PROJECT_ID" \
+            jq -nc --arg q "$READ_Q" --arg pid "$PROJECT_ID" \
               '{query:$q, variables:{pid:$pid}}' \
-              | gh api graphql --input - > proj.json; then
-              echo "[ERR] GraphQL fetch failed for PROJECT_ID=$PROJECT_ID"
-              echo "[DBG] READ_Q(head): $(printf '%s' "$READ_Q" | head -c 300)"
-              exit 1
-            fi
+            | gh api graphql --input - > proj.json
 
-            # ---[DEBUG] 필드/옵션 확인
+            # ---- Status 옵션을 위해 fields만 별도 조회 (options 필요) ----
             FQ='query($pid:ID!){
               node(id:$pid){
                 ... on ProjectV2{
@@ -176,159 +148,28 @@ jobs:
               '{query:$q, variables:{pid:$pid}}' \
             | gh api graphql --input - > fields.json
 
-            echo "[DBG] --- Fields (name, type) ---"
-            jq -r '.data.node.fields.nodes[]
-                  | [.name, .__typename, (.dataType // "")]
-                  | @tsv' fields.json \
-              | awk -F'\t' '{printf "  %-24s  %-28s  %s\n",$1,$2,$3}'
-
-            echo "[DBG] --- Status options ---"
-            jq -r '.data.node.fields.nodes[]
-                  | select(.name | test("(?i)^status\\s*$"))        # 대소문자/공백 허용
-                  | select(.__typename=="ProjectV2SingleSelectField")
-                  | .options[].name' fields.json \
-              | sed 's/^/  - /' || true
-
-            # [DBG A] Status 필드 ID
-            STATUS_ID=$(jq -r '.data.node.fields.nodes[] | select(.name | test("(?i)^status\\s*$")) | .id' fields.json)
-            echo "[DBG] STATUS_ID=${STATUS_ID}"
-
-            # Status 옵션들(JSON array) 추출
             STATUS_OPTS_JSON=$(jq -c '
               [.data.node.fields.nodes[]
-              | select((.name|test("(?i)^status\\s*$")) and .__typename=="ProjectV2SingleSelectField")
-              | .options[].name]
+               | select((.name|test("(?i)^status\\s*$")) and .__typename=="ProjectV2SingleSelectField")
+               | .options[].name]
             ' fields.json)
 
-            echo "[DBG] STATUS_OPTS_JSON=${STATUS_OPTS_JSON}"
-
-            # [DBG B] RAW dump: item별 fieldValues (한 값당 한 줄 JSON)
-            echo "[DBG] --- RAW dump: fieldValues per item (one JSON per value) ---"
-            jq -r '
-              .data.node.items.nodes[] as $it
-              | ($it.id) as $id
-              | ($it.content.title // "") as $title
-              | ($it.content.__typename // "") as $ctype
-              | ($it.content.url // "") as $url
-              | $it.fieldValues.nodes[]
-              | {
-                  item_id:      $id,
-                  title:        $title,
-                  type:         $ctype,
-                  url:          $url,
-                  value_typename: .__typename,
-                  field_id:     (.field.id   // null),
-                  field_name:   (.field.name // null),
-                  select_name:  (.name // null),
-                  text:         (.text // null),
-                  users:        ( if (.users? and .users.nodes?)
-                                  then (.users.nodes | map(.login))
-                                  else [] end )
-                }
-              | @json
-            ' proj.json
-
-            # [DBG C] STATUS_ID로 매칭되는 값이 카드에 어떻게 붙는지
-            echo "[DBG] --- Items having fieldValues with STATUS_ID ---"
-            jq -r --arg sid "$STATUS_ID" '
-              .data.node.items.nodes[]
-              | {
-                  id,
-                  title: (.content.title // ""),
-                  status_values: (
-                    .fieldValues.nodes
-                    | map(select((.field.id? // "") == $sid))
-                    | map({
-                        value_typename: .__typename,
-                        select_name: (.name // null),
-                        text: (.text // null)
-                      })
-                  )
-                }
-              | @json
-            ' proj.json
-
-            # --- 아이템 스냅샷 출력 (Status 대소문자/공백 허용)
-            echo "[DBG] --- Project snapshot (id, title, status, reviewers, assignee, type, url) ---"
-            jq -r --argjson sopts "${STATUS_OPTS_JSON:-[]}" '
-              .data.node.items.nodes[]
-              | {
-                  id,
-                  title: (.content.title // ""),
-                  # ── Status: field=null 이어도, 옵션 이름 매칭으로 추출
-                  status: (
-                    .fieldValues.nodes
-                    | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
-                    | map(select((.name // "") as $n | ($sopts | index($n))))
-                    | (.[0].name // "")
-                  ),
-                  reviewers: (
-                    .fieldValues.nodes
-                    | map(select((.field.name? // "") | test("(?i)^reviewers\\(auto\\)\\s*$")))
-                    | (.[0].text // "")
-                  ),
-                  assignee: (
-                    (.fieldValues.nodes
-                      | map(select((.field.name? // "") | test("(?i)^assignee\\s*$")))
-                      | (.[0].users.nodes[0].login // empty))
-                    // (.fieldValues.nodes
-                      | map(select((.field.name? // "") | test("(?i)^assignees\\s*$")))
-                      | (.[0].users.nodes[0].login // empty))
-                    // ""
-                  ),
-                  type: (.content.__typename // ""),
-                  url:  (.content.url // "")
-                }
-              | [ .id, .title, .status, .reviewers, .assignee, .type, .url ]
-              | @tsv
-            ' proj.json | awk -F'\t' 'BEGIN{
-              printf "ID\tTITLE\tSTATUS\tRV(auto)\tASSIGNEE\tTYPE\tURL\n"
-            }{ print }'
-
-            echo "[DBG] --- Per-item fieldValues summary (field=value) ---"
-            jq -r '
-              .data.node.items.nodes[]
-              | {
-                  id,
-                  title: (.content.title // ""),
-                  pairs: (
-                    .fieldValues.nodes
-                    | map(
-                        . as $v
-                        | ((($v.field.name? // "<no-field>") | tostring) + "=") +
-                          ( if $v.__typename=="ProjectV2ItemFieldSingleSelectValue" then ($v.name // "")
-                            elif $v.__typename=="ProjectV2ItemFieldTextValue"        then ($v.text // "")
-                            elif $v.__typename=="ProjectV2ItemFieldUserValue"        then ( ($v.users.nodes | map(.login) | join(",")) // "" )
-                            else "" end )
-                      )
-                    | join("; ")
-                  )
-                }
-              | "\(.id)\t\(.title)\t\(.pairs)"
-            ' proj.json | awk -F'\t' 'BEGIN{
-              printf "ID\tTITLE\tFIELDS\n"
-            }{ print }'
-
-            # 필드 ID 캐시
             RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' proj.json)
-            echo "[DBG] RV_FIELD_ID=${RV_FIELD_ID}"
-
-            if [ -z "$RV_FIELD_ID" ]; then
-              echo "WARN: Required field missing (Reviewers(auto)). Skip $KEY"
+            if [ -z "$RV_FIELD_ID" ] || [ "$RV_FIELD_ID" = "null" ]; then
+              echo "WARN: Reviewers(auto) 필드가 없어 $KEY 스킵"
               echo "::endgroup::"
               continue
             fi
 
-            # 준비: state 초기 병합
+            # ---- state 초기 병합 & 스프린트 전환 처리 ----
             jq -s '.[0] * .[1]' <(echo '{"quota_usage":{},"processed_card_ids":[]}' ) "$ST" > _st.json || echo '{}' > _st.json
             mv _st.json "$ST"
 
-            # 스프린트 전환 시 쿼터/처리ID 초기화
             CUR=$(jq -r '.sprint // empty' "$ST")
             if [ "$CUR" != "$SPRINT" ]; then
               jq --arg s "$SPRINT" '
                 .sprint = $s
-                | .quota_per_sprint //= '"$QUOTA"'
+                | .quota_per_sprint //= 0
                 | .quota_usage = {}
                 | .processed_card_ids = []
               ' "$ST" > _st.json && mv _st.json "$ST"
@@ -336,19 +177,17 @@ jobs:
 
             PROCESSED=$(jq -c '.processed_card_ids' "$ST")
 
-            # 2-2) 대상 아이템 추출 (Status=Ready & Reviewers(auto) empty & 미처리)
+            # ---- 대상 아이템 추출 (Status=Ready & Reviewers(auto) empty & 미처리) ----
             jq -r --argjson done "$PROCESSED" --argjson sopts "${STATUS_OPTS_JSON:-[]}" '
               .data.node.items.nodes[]
               | {id, content: .content, fields: .fieldValues.nodes}
               | select(.id as $id | ($done | index($id)) | not)
-              # ── Status=Ready?  (옵션 이름 매칭 기반)
               | select(
                   (.fields
                     | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
                     | map(.name // "")
                     | map(ascii_downcase)) as $vals
                   | ($vals | index("ready"))
-                  # 위 줄이 true 인데, 그 "ready" 값이 실제 Status 옵션 안에 있어야 함
                   and (
                     (.fields
                       | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
@@ -356,7 +195,6 @@ jobs:
                     | any($names[]; ($sopts | index(.)))
                   )
                 )
-              # ── Reviewers(auto) 비었는가?
               | select((
                   [.fields[]
                   | select((.field.name? // "") | test("(?i)^reviewers\\(auto\\)\\s*$"))
@@ -369,17 +207,15 @@ jobs:
             ' proj.json > items.b64
 
             if [ ! -s items.b64 ]; then
-              echo "No Ready items without reviewers — skip $KEY"
+              echo "No Ready items without reviewers — $KEY"
               echo "::endgroup::"
               continue
             fi
 
-            # 2-3) 각 아이템 처리
+            # ---- 아이템 처리 ----
             while read -r ROW; do
               J=$(echo "$ROW" | base64 -d)
               ITEM_ID=$(echo "$J" | jq -r '.id')
-
-              # 필드 값 파싱 (Assignee / content)
               ASSIGNEE=$(echo "$J" | jq -r '
                 (.fields[] | select(.field.name=="Assignee")  | .users.nodes[0].login // empty),
                 (.fields[] | select(.field.name=="Assignees") | .users.nodes[0].login // empty)
@@ -388,9 +224,7 @@ jobs:
               ISSUE_URL=$(echo "$J" | jq -r '.content.url // ""')
               REPO_NWO=$(echo "$J" | jq -r '.content.repository.nameWithOwner // ""')
 
-              echo "[DBG][ITEM] ITEM_ID=${ITEM_ID} CTYPE=${CTYPE} REPO_NWO=${REPO_NWO} ISSUE_URL=${ISSUE_URL} ASSIGNEE=${ASSIGNEE}"
-
-              # 후보 풀 구성 (제외 규칙 적용)
+              # 후보풀(제외/자기자신 제외) → 셔플 → 쿼터 필터 → 픽
               CAND=()
               for u in $POOL; do
                 [ -z "$u" ] && continue
@@ -398,52 +232,36 @@ jobs:
                 [ "$u" = "$ASSIGNEE" ] && continue
                 CAND+=("$u")
               done
-
-              # 쿼터 필터
               SEL=()
               for u in $(printf "%s\n" "${CAND[@]}" | shuf); do
                 USED=$(jq -r --arg u "$u" '.quota_usage[$u] // 0' "$ST")
                 [ "$USED" -lt "$QUOTA" ] && SEL+=("$u")
               done
-
-              # 최종 픽 (1~REVIEWERS_NEEDED)
               PICKS=()
               for u in "${SEL[@]}"; do
                 PICKS+=("$u")
                 [ ${#PICKS[@]} -ge $REVIEWERS_NEEDED ] && break
               done
-
               COUNT=${#PICKS[@]}
-              echo "[DBG][ITEM] CAND=(${CAND[*]})"
-              echo "[DBG][ITEM] SEL =(${SEL[*]})"
-              echo "[DBG][ITEM] PICKS=(${PICKS[*]}) COUNT=${COUNT}"
-
               if [ $COUNT -eq 0 ]; then
                 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                MSG="❌ [AUTO][$NOW][$KEY] 리뷰어를 배정할 수 없습니다.\n- 사유: 후보 풀 전원 쿼터 초과/제외 규칙 충돌\n- 조치: 풀 확장 또는 쿼터 상향 후 Backlog→Ready로 재시도"
+                MSG="❌ [AUTO][$NOW][$KEY] 리뷰어 배정 실패(쿼터/제외 충돌)"
                 if [ "$CTYPE" = "Issue" ] || [ "$CTYPE" = "PullRequest" ]; then
                   gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments -f body="$MSG" >/dev/null || true
-                else
-                  TITLE="Review Log · ${KEY} · Item $ITEM_ID"
-                  NUM=$(gh issue list --state all --search "$TITLE in:title" --json number,title | jq -r '.[]|select(.title=="'"$TITLE"'")|.number' | head -n1)
-                  if [ -z "$NUM" ]; then
-                    NUM=$(gh issue create -t "$TITLE" -b "Append-only logs for the Project card." --label "review-log" --json number | jq -r '.number')
-                  fi
-                  gh issue comment "$NUM" -b "$MSG" >/dev/null || true
                 fi
                 continue
               fi
 
-              # 필드 업데이트 (Reviewers(auto))
               if [ $COUNT -eq 1 ]; then
                 REV="@${PICKS[0]}"
               else
                 REV="@${PICKS[0]}, @${PICKS[1]}"
               fi
 
-              echo "[DBG][ASSIGN] REV=${REV}"
-
-              M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}){clientMutationId}}'
+              M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){
+                updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}){
+                  clientMutationId
+                }}'
               for vname in PROJECT_ID ITEM_ID RV_FIELD_ID; do
                 eval "v=\${$vname}"
                 if [ -z "$v" ]; then
@@ -451,7 +269,6 @@ jobs:
                   exit 1
                 fi
               done
-
               jq -nc \
                 --arg q "$M" \
                 --arg pid  "$PROJECT_ID" \
@@ -461,18 +278,10 @@ jobs:
                 '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, text:$text}}' \
               | gh api graphql --input - >/dev/null
 
-              # 코멘트(멘션)
               NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-              MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정: $REV\n- 스프린트: $SPRINT\n- 쿼터: $QUOTA/인"
+              MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정: $REV · 스프린트: $SPRINT · 쿼터: $QUOTA/인"
               if [ "$CTYPE" = "Issue" ] || [ "$CTYPE" = "PullRequest" ]; then
                 gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments -f body="$MSG" >/dev/null || true
-              else
-                TITLE="Review Log · ${KEY} · Item $ITEM_ID"
-                NUM=$(gh issue list --state all --search "$TITLE in:title" --json number,title | jq -r '.[]|select(.title=="'"$TITLE"'")|.number' | head -n1)
-                if [ -z "$NUM" ]; then
-                  NUM=$(gh issue create -t "$TITLE" -b "Append-only logs for the Project card." --label "review-log" --json number | jq -r '.number')
-                fi
-                gh issue comment "$NUM" -b "$MSG" >/dev/null || true
               fi
 
               # state 업데이트
@@ -484,19 +293,35 @@ jobs:
                 P1="${PICKS[1]}"
                 jq --arg u "$P1" '.quota_usage[$u] = ((.quota_usage[$u] // 0) + 1)' "$ST" > _st.json && mv _st.json "$ST"
               fi
-              jq --arg id "$ITEM_ID" '.processed_card_ids |= ( . + [$id] | unique ) | .last_run_at="'$NOW'" | .sprint="'$SPRINT'" | .quota_per_sprint='"$QUOTA"'' "$ST" > _st.json && mv _st.json "$ST"
+              jq --arg id "$ITEM_ID" --arg s "$SPRINT" --argjson q "$QUOTA" '
+                .processed_card_ids |= ( . + [$id] | unique )
+                | .last_run_at = "'$NOW'"
+                | .sprint = $s
+                | .quota_per_sprint = $q
+              ' "$ST" > _st.json && mv _st.json "$ST"
 
             done < items.b64
 
-            # state 커밋
+            # ---- 커밋 & 푸시 (초기 트래킹/충돌 방지 포함) ----
+            git config --global safe.directory "$GITHUB_WORKSPACE"
             git config user.name  "project-hub-bot"
             git config user.email "bot@users.noreply.github.com"
+
+            # state 디렉터리가 아직 트래킹 안되었으면 초기화 커밋 1회
+            if ! git ls-files --error-unmatch state >/dev/null 2>&1; then
+              touch state/.gitkeep
+              git add state/.gitkeep
+              git commit -m "init(state): track state directory" || true
+              git pull --rebase || true
+              git push || true
+            fi
+
+            # 실제 변경이 있으면 커밋/푸시
             if ! git diff --quiet -- state/ ; then
               git add state/
-              git commit -m "state(${KEY}): update @ $GITHUB_RUN_ID" || true
-              git push || true
-            else
-              echo "No state changes for $KEY"
+              git commit -m "state(${KEY}): update @ ${GITHUB_RUN_ID}" || true
+              git pull --rebase || true
+              git push || (sleep 2 && git pull --rebase && git push) || true
             fi
 
             echo "::endgroup::"
