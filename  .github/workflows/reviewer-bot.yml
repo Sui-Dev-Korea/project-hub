@@ -1,0 +1,266 @@
+name: reviewer-bot
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # 5분마다 폴링
+  workflow_dispatch: {}      # 수동 실행
+
+permissions:
+  contents: write
+  issues: write
+  projects: write
+
+env:
+  TZ: Asia/Seoul
+  BOT_NAME: reviewer
+  GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+
+jobs:
+  assign-reviewers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          curl -sSL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+      - name: Install GitHub CLI
+        run: |
+          type -p gh >/dev/null || sudo apt-get update -y
+          type -p gh >/dev/null || sudo apt-get install -y gh
+
+      # 1) 관리 중인 프로젝트(config/reviewer/*.yml) 전체 추출
+      - name: Find managed projects
+        id: list
+        run: |
+          ls .github/config/${{ env.BOT_NAME }}/*.yml 2>/dev/null | sed 's#.*/##; s#\.yml$##' > projects.txt || true
+          echo "count=$(wc -l < projects.txt | tr -d ' ')" >> $GITHUB_OUTPUT
+
+      - name: No managed projects? (short-circuit)
+        if: ${{ steps.list.outputs.count == '0' }}
+        run: echo "No configs under .github/config/${{ env.BOT_NAME }} — nothing to do."
+
+      # 2) 프로젝트들 순회
+      - name: Loop over projects
+        if: ${{ steps.list.outputs.count != '0' }}
+        run: |
+          set -e
+          while read -r KEY; do
+            [ -z "$KEY" ] && continue
+            echo "::group::Process project = $KEY"
+
+            CFG=".github/config/${{ env.BOT_NAME }}/${KEY}.yml"
+            ST="state/${{ env.BOT_NAME }}/${KEY}.json"
+            mkdir -p state/${{ env.BOT_NAME }}
+            [ -f "$ST" ] || echo '{}' > "$ST"
+
+            PROJECT_ID=$(yq -r '.project_id // ""' "$CFG")
+            REVIEWERS_NEEDED=$(yq -r '.reviewers_needed // 2' "$CFG")
+            QUOTA=$(yq -r '.quota_per_sprint // 8' "$CFG")
+            SPRINT=$(yq -r '.sprint // "default-sprint"' "$CFG")
+            POOL=$(yq -r '.eligible_pool[]? // empty' "$CFG" | tr '\n' ' ')
+            EXC=$(yq -r '.exclude_rules[]? // empty' "$CFG" | tr '\n' ' ')
+
+            if [ -z "$PROJECT_ID" ]; then
+              echo "WARN: $KEY has no project_id (PVT_...). Skip."
+              echo "::endgroup::"
+              continue
+            fi
+
+            # 2-1) 이 프로젝트에서 Ready + Reviewers(auto) 빈 카드 목록 조회
+            read -r -d '' Q <<'GQL'
+            query($pid:ID!) {
+              node(id:$pid){
+                ... on ProjectV2 {
+                  items(first:100) {
+                    nodes {
+                      id
+                      content {
+                        __typename
+                        ... on Issue { id number url repository { nameWithOwner } }
+                        ... on PullRequest { id number url repository { nameWithOwner } }
+                      }
+                      fieldValues(first:50){
+                        nodes{
+                          __typename
+                          ... on ProjectV2ItemFieldSingleSelectValue { field { ... on ProjectV2Field { id name } } name }
+                          ... on ProjectV2ItemFieldTextValue        { field { ... on ProjectV2Field { id name } } text }
+                          ... on ProjectV2ItemFieldUserValue        { field { ... on ProjectV2Field { id name } } users(first:10){ nodes{ login } } }
+                        }
+                      }
+                    }
+                  }
+                  fields(first:50){ nodes { id name dataType } }
+                }
+              }
+            }
+            GQL
+
+            gh api graphql -f query="$Q" -F pid="$PROJECT_ID" > proj.json
+
+            # 필드 ID 캐시
+            RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' proj.json)
+            LA_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Last Action") | .id' proj.json)
+
+            # 필드 없으면 스킵(원하면 자동 생성 로직으로 확장 가능)
+            if [ -z "$RV_FIELD_ID" ] || [ -z "$LA_FIELD_ID" ]; then
+              echo "WARN: Required fields missing (Reviewers(auto)/Last Action). Skip $KEY"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # 준비: state 초기 병합
+            jq -s '.[0] * .[1]' <(echo '{"quota_usage":{},"processed_card_ids":[]}' ) "$ST" > _st.json || echo '{}' > _st.json
+            mv _st.json "$ST"
+
+            # 스프린트 전환 시 쿼터/처리ID 초기화
+            CUR=$(jq -r '.sprint // empty' "$ST")
+            if [ "$CUR" != "$SPRINT" ]; then
+              jq --arg s "$SPRINT" '
+                .sprint = $s
+                | .quota_per_sprint //= '"$QUOTA"'
+                | .quota_usage = {}
+                | .processed_card_ids = []
+              ' "$ST" > _st.json && mv _st.json "$ST"
+            fi
+
+            PROCESSED=$(jq -c '.processed_card_ids' "$ST")
+
+            # 2-2) 처리 대상 아이템 추출 (Status == Ready AND Reviewers(auto) empty AND state 미처리)
+            jq -r --argjson done "$PROCESSED" '
+              .data.node.items.nodes[]
+              | {id, content: .content, fields: .fieldValues.nodes}
+              | select(.id as $id | ($done | index($id)) | not)
+              | select([.fields[] | select(.field.name=="Status") | .name] | index("Ready"))
+              | select(([.fields[] | select(.field.name=="Reviewers(auto)") | .text] | .[0]) == null or
+                       ([.fields[] | select(.field.name=="Reviewers(auto)") | .text] | .[0]) == "")
+              | @base64
+            ' proj.json > items.b64
+
+            if [ ! -s items.b64 ]; then
+              echo "No Ready items without reviewers — skip $KEY"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # 2-3) 각 아이템 처리
+            while read -r ROW; do
+              J=$(echo "$ROW" | base64 -d)
+              ITEM_ID=$(echo "$J" | jq -r '.id')
+
+              # 필드 값 파싱 (Assignee / content)
+              ASSIGNEE=$(echo "$J" | jq -r '
+                (.fields[] | select(.field.name=="Assignee")  | .users.nodes[0].login // empty),
+                (.fields[] | select(.field.name=="Assignees") | .users.nodes[0].login // empty)
+              ' | head -n1)
+              CTYPE=$(echo "$J" | jq -r '.content.__typename // "DRAFT"')
+              ISSUE_URL=$(echo "$J" | jq -r '.content.url // ""')
+              REPO_NWO=$(echo "$J" | jq -r '.content.repository.nameWithOwner // ""')
+
+              # 후보 풀 구성 (제외 규칙 적용)
+              CAND=()
+              for u in $POOL; do
+                [ -z "$u" ] && continue
+                echo " $EXC " | grep -qw " $u " && continue
+                [ "$u" = "$ASSIGNEE" ] && continue
+                CAND+=("$u")
+              done
+
+              # 쿼터 필터
+              SEL=()
+              for u in $(printf "%s\n" "${CAND[@]}" | shuf); do
+                USED=$(jq -r --arg u "$u" '.quota_usage[$u] // 0' "$ST")
+                [ "$USED" -lt "$QUOTA" ] && SEL+=("$u")
+              done
+
+              # 최종 픽 (1~REVIEWERS_NEEDED, 1명만 되어도 정상)
+              PICKS=()
+              for u in "${SEL[@]}"; do
+                PICKS+=("$u")
+                [ ${#PICKS[@]} -ge $REVIEWERS_NEEDED ] && break
+              done
+
+              COUNT=${#PICKS[@]}
+              if [ $COUNT -eq 0 ]; then
+                NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                MSG="❌ [AUTO][$NOW][$KEY] 리뷰어를 배정할 수 없습니다.\n- 사유: 후보 풀 전원 쿼터 초과/제외 규칙 충돌\n- 조치: 풀 확장 또는 쿼터 상향 후 Backlog→Ready로 재시도"
+                if [ "$CTYPE" = "Issue" ] || [ "$CTYPE" = "PullRequest" ]; then
+                  gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments -f body="$MSG" >/dev/null || true
+                else
+                  TITLE="Review Log · ${KEY} · Item $ITEM_ID"
+                  NUM=$(gh issue list --state all --search "$TITLE in:title" --json number,title | jq -r '.[]|select(.title=="'"$TITLE"'")|.number' | head -n1)
+                  if [ -z "$NUM" ]; then
+                    NUM=$(gh issue create -t "$TITLE" -b "Append-only logs for the Project card." --label "review-log" --json number | jq -r '.number')
+                  fi
+                  gh issue comment "$NUM" -b "$MSG" >/dev/null || true
+                fi
+                # 실패도 처리 기록 남겨 중복 재시도 방지하려면 아래 줄 주석 해제
+                # jq --arg id "$ITEM_ID" '.processed_card_ids |= ( . + [$id] | unique )' "$ST" > _st.json && mv _st.json "$ST"
+                continue
+              fi
+
+              # 필드 업데이트 (Reviewers(auto), Last Action)
+              if [ $COUNT -eq 1 ]; then
+                REV="@${PICKS[0]}"
+                LA="OK_ASSIGNED: @${PICKS[0]}"
+              else
+                REV="@${PICKS[0]}, @${PICKS[1]}"
+                LA="OK_ASSIGNED: @${PICKS[0]}, @${PICKS[1]}"
+              fi
+
+              read -r -d '' M <<'GQL'
+              mutation($pid:ID!, $item:ID!, $fid:ID!, $text:String!){
+                updateProjectV2ItemFieldValue(
+                  input:{projectId:$pid, itemId:$item, fieldId:$fid, value:{text:$text}}
+                ){ clientMutationId }
+              }
+              GQL
+
+              gh api graphql -f query="$M" -F pid="$PROJECT_ID" -F item="$ITEM_ID" -F fid="$RV_FIELD_ID" -F text="$REV" >/dev/null
+              gh api graphql -f query="$M" -F pid="$PROJECT_ID" -F item="$ITEM_ID" -F fid="$LA_FIELD_ID" -F text="$LA"  >/dev/null
+
+              # 코멘트(멘션) — append-only
+              NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정: $REV\n- 스프린트: $SPRINT\n- 쿼터: $QUOTA/인"
+              if [ "$CTYPE" = "Issue" ] || [ "$CTYPE" = "PullRequest" ]; then
+                gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments -f body="$MSG" >/dev/null || true
+              else
+                TITLE="Review Log · ${KEY} · Item $ITEM_ID"
+                NUM=$(gh issue list --state all --search "$TITLE in:title" --json number,title | jq -r '.[]|select(.title=="'"$TITLE"'")|.number' | head -n1)
+                if [ -z "$NUM" ]; then
+                  NUM=$(gh issue create -t "$TITLE" -b "Append-only logs for the Project card." --label "review-log" --json number | jq -r '.number')
+                fi
+                gh issue comment "$NUM" -b "$MSG" >/dev/null || true
+              fi
+
+              # state 업데이트 (쿼터/processed/timestamp)
+              if [ $COUNT -ge 1 ]; then
+                P0="${PICKS[0]}"
+                jq --arg u "$P0" '.quota_usage[$u] = ((.quota_usage[$u] // 0) + 1)' "$ST" > _st.json && mv _st.json "$ST"
+              fi
+              if [ $COUNT -ge 2 ]; then
+                P1="${PICKS[1]}"
+                jq --arg u "$P1" '.quota_usage[$u] = ((.quota_usage[$u] // 0) + 1)' "$ST" > _st.json && mv _st.json "$ST"
+              fi
+              jq --arg id "$ITEM_ID" '.processed_card_ids |= ( . + [$id] | unique ) | .last_run_at="'$NOW'" | .sprint="'$SPRINT'" | .quota_per_sprint='"$QUOTA"'' "$ST" > _st.json && mv _st.json "$ST"
+
+            done < items.b64
+
+            # state 커밋
+            git config user.name  "project-hub-bot"
+            git config user.email "bot@users.noreply.github.com"
+            if ! git diff --quiet -- state/ ; then
+              git add state/
+              git commit -m "state(${KEY}): update @ $GITHUB_RUN_ID" || true
+              git push || true
+            else
+              echo "No state changes for $KEY"
+            fi
+
+            echo "::endgroup::"
+          done < projects.txt
