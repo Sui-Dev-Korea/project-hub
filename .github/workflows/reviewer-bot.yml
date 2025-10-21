@@ -196,8 +196,8 @@ jobs:
               | {
                   id,
                   title:     (.content.title // ""),
-                  status:    (.fieldValues.nodes
-                              | map(select(.field.name | test("(?i)^status\\s*$")))
+                  status: (.fieldValues.nodes
+                              | map(select((.field.name? // "") | test("(?i)^status\\s*$")))
                               | (.[0].name // "")),
                   reviewers: (.fieldValues.nodes
                               | map(select(.field.name=="Reviewers(auto)"))
