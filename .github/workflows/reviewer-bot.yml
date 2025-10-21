@@ -99,7 +99,7 @@ jobs:
                 }
               }
             }
-            GQL
+GQL
 
             gh api graphql -f query="$Q" -F pid="$PROJECT_ID" > proj.json
 
@@ -219,7 +219,7 @@ jobs:
                   input:{projectId:$pid, itemId:$item, fieldId:$fid, value:{text:$text}}
                 ){ clientMutationId }
               }
-              GQL
+GQL
 
               gh api graphql -f query="$M" -F pid="$PROJECT_ID" -F item="$ITEM_ID" -F fid="$RV_FIELD_ID" -F text="$REV" >/dev/null
               gh api graphql -f query="$M" -F pid="$PROJECT_ID" -F item="$ITEM_ID" -F fid="$LA_FIELD_ID" -F text="$LA"  >/dev/null
