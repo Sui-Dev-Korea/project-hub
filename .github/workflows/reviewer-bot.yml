@@ -192,9 +192,32 @@ jobs:
                 LA="OK_ASSIGNED: @${PICKS[0]}, @${PICKS[1]}"
               fi
 
-              M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}){clientMutationId}}'
-              gh api graphql -f query="$M" -F pid="$PROJECT_ID" -F item="$ITEM_ID" -F fid="$RV_FIELD_ID" -F text="$REV" >/dev/null
-              gh api graphql -f query="$M" -F pid="$PROJECT_ID" -F item="$ITEM_ID" -F fid="$LA_FIELD_ID" -F text="$LA"  >/dev/null
+              gh api graphql \
+                -f query='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){
+                  updateProjectV2ItemFieldValue(
+                    input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}
+                  ){ clientMutationId }
+                }' \
+                -f variables="$(jq -nc \
+                    --arg pid   "$PROJECT_ID" \
+                    --arg item  "$ITEM_ID" \
+                    --arg fid   "$RV_FIELD_ID" \
+                    --arg text  "$REV" \
+                    '{pid:$pid,item:$item,fid:$fid,text:$text}')" \
+                >/dev/null
+              gh api graphql \
+                -f query='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){
+                  updateProjectV2ItemFieldValue(
+                    input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}
+                  ){ clientMutationId }
+                }' \
+                -f variables="$(jq -nc \
+                    --arg pid   "$PROJECT_ID" \
+                    --arg item  "$ITEM_ID" \
+                    --arg fid   "$LA_FIELD_ID" \
+                    --arg text  "$LA" \
+                    '{pid:$pid,item:$item,fid:$fid,text:$text}')" \
+                >/dev/null
 
               # 코멘트(멘션) — append-only
               NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
