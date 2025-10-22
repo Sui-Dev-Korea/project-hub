@@ -1,7 +1,7 @@
 {
   "quota_usage": {
-    "nubro999": 5,
-    "devan-ko": 2,
+    "nubro999": 6,
+    "devan-ko": 3,
     "guboc11": 2,
     "roode1017": 2,
     "parksol2004": 5,
@@ -25,5 +25,5 @@
   ],
   "sprint": "2025-W43",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-10-22T09:35:59Z"
+  "last_run_at": "2025-10-22T11:23:43Z"
 }
