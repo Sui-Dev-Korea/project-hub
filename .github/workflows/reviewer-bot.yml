@@ -187,7 +187,17 @@ jobs:
             jq -r --argjson done "$PROCESSED" --argjson sopts "${STATUS_OPTS_JSON:-[]}" '
               .data.node.items.nodes[]
               | {id, content: .content, fields: .fieldValues.nodes}
-              | select(.id as $id | ($done | index($id)) | not)
+              | (
+                  .fields[]
+                  | select((.field.name? // "") | test("(?i)^reviewers\\(auto\\)\\s*$"))
+                  | .text // ""
+                ) as $rv
+              | ($rv | gsub("\\s+"; "") | ascii_downcase) as $rv_trim
+
+              # processed 상태라도 reviewers(auto)가 비어 있으면 재처리
+              | select(($rv_trim == "") or (.id as $id | ($done | index($id)) | not))
+
+              # Status=Ready인 카드만
               | select(
                   (.fields
                     | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
@@ -201,14 +211,10 @@ jobs:
                     | any($names[]; ($sopts | index(.)))
                   )
                 )
-              | select((
-                  [.fields[]
-                  | select((.field.name? // "") | test("(?i)^reviewers\\(auto\\)\\s*$"))
-                  | .text] | .[0]) == null or
-                  (
-                  [.fields[]
-                    | select((.field.name? // "") | test("(?i)^reviewers\\(auto\\)\\s*$"))
-                    | .text] | .[0]) == "")
+
+              # reviewers(auto)가 비어있는 경우만 실제 처리
+              | select($rv_trim == "")
+
               | @base64
             ' proj.json > items.b64
 
