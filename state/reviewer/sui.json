@@ -2,10 +2,10 @@
   "quota_usage": {
     "nubro999": 6,
     "devan-ko": 3,
-    "guboc11": 2,
+    "guboc11": 3,
     "roode1017": 2,
     "parksol2004": 5,
-    "gkfyr": 5,
+    "gkfyr": 6,
     "daoauth": 2,
     "jade653": 1
   },
@@ -21,9 +21,10 @@
     "PVTI_lADODc3yn84BEdTSzgfYTW4",
     "PVTI_lADODc3yn84BEdTSzgfYTYo",
     "PVTI_lADODc3yn84BEdTSzgfYTrE",
-    "PVTI_lADODc3yn84BEdTSzgfaTrw"
+    "PVTI_lADODc3yn84BEdTSzgfaTrw",
+    "PVTI_lADODc3yn84BEdTSzggGDBg"
   ],
   "sprint": "2025-W43",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-10-22T11:23:43Z"
+  "last_run_at": "2025-10-24T13:01:59Z"
 }
