@@ -74,7 +74,13 @@ jobs:
             ORG=$(yq -r '.project_org // ""' "$CFG")
             NUM=$(yq -r '.project_number // ""' "$CFG")
             if [ -z "$PROJECT_ID" ] && [ -n "$ORG" ] && [ -n "$NUM" ]; then
-              Q='query($org:String!,$num:Int!){organization(login:$org){projectV2(number:$num){id title}}}'
+              Q='query($org:String!,$num:Int!){
+                organization(login:$org){
+                  projectV2(number:$num){
+                    id title
+                  }
+                }
+              }'
               PROJECT_ID=$(jq -nc --arg q "$Q" --arg org "$ORG" --argjson num "$NUM" \
                 '{query:$q,variables:{org:$org,num:$num}}' | gh api graphql --input - \
                 | jq -r '.data.organization.projectV2.id // empty')
@@ -90,6 +96,8 @@ jobs:
             SPRINT=$(yq -r '.sprint // "default-sprint"' "$CFG")
             POOL=$(yq -r '(.eligible_pool // [])[]? // ""' "$CFG" | tr '\n' ' ')
             EXC=$(yq -r '(.exclude_rules // [])[]? // ""' "$CFG" | tr '\n' ' ')
+            REVIEWERS_NEEDED=$((REVIEWERS_NEEDED + 0))
+            QUOTA=$((QUOTA + 0))
 
             # ---- 프로젝트 스냅샷 (필드 + 아이템) ----
             READ_Q='query($pid:ID!){
@@ -182,11 +190,7 @@ jobs:
 
             PROCESSED=$(jq -c '.processed_card_ids' "$ST")
 
-            # ---- 대상 아이템 추출
-            # 조건:
-            #  1) Status = "In review" (옵션 이름 매칭, 대소문자/공백 무시)
-            #  2) Reviewers(auto) 값이 비어있음 (없음/빈문자열/공백만)
-            #  3) 이미 processed라도 Reviewers(auto)가 비면 재처리 허용
+            # ---- 대상 아이템 추출 ----
             jq -r --argjson done "$PROCESSED" --argjson sopts "${STATUS_OPTS_JSON:-[]}" '
               .data.node.items.nodes[]
               | {id, content: .content, fields: .fieldValues.nodes}
@@ -203,7 +207,7 @@ jobs:
               # processed되어 있어도 Reviewers(auto)가 비면 재처리
               | select(($rv_trim == "") or (.id as $id | ($done | index($id)) | not))
 
-              # Status = "In review" 인 카드만
+              # Status = "In review" 인 카드만 (대소문자 무시 + 옵션 검증)
               | select(
                   (.fields
                     | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
@@ -231,6 +235,7 @@ jobs:
             fi
 
             # ---- 아이템 처리 ----
+            trap 'rm -f "$ST.tmp" _tmp.json 2>/dev/null || true' EXIT ERR
             while read -r ROW; do
               J=$(echo "$ROW" | base64 -d)
               ITEM_ID=$(echo "$J" | jq -r '.id')
@@ -239,7 +244,6 @@ jobs:
                 (.fields[] | select(.field.name=="Assignees") | .users.nodes[0].login // empty)
               ' | head -n1)
 
-              # Assignee 미지정 카드는 스킵 (요청사항)
               if [ -z "$ASSIGNEE" ]; then
                 echo "Skip card $ITEM_ID (no Assignee)"
                 continue
@@ -249,7 +253,6 @@ jobs:
               ISSUE_URL=$(echo "$J" | jq -r '.content.url // ""')
               REPO_NWO=$(echo "$J" | jq -r '.content.repository.nameWithOwner // ""')
 
-              # 후보풀 구성(제외 규칙/자기자신 제외) → 셔플 → 쿼터 필터 → 픽
               CAND=()
               for u in $POOL; do
                 [ -z "$u" ] && continue
@@ -257,22 +260,43 @@ jobs:
                 [ "$u" = "$ASSIGNEE" ] && continue
                 CAND+=("$u")
               done
-              SEL=()
-              for u in $(printf "%s\n" "${CAND[@]}" | shuf); do
-                USED=$(jq -r --arg u "$u" '.quota_usage[$u] // 0' "$ST")
-                [ "$USED" -lt "$QUOTA" ] && SEL+=("$u")
-              done
+
               PICKS=()
-              for u in "${SEL[@]}"; do
-                PICKS+=("$u")
-                [ ${#PICKS[@]} -ge $REVIEWERS_NEEDED ] && break
+              TMP_ST="$ST.tmp"
+              cp "$ST" "$TMP_ST"
+
+              for i in $(seq 1 $REVIEWERS_NEEDED); do
+                ELIG=()
+                MIN=999999
+                declare -A USED_MAP
+                for u in "${CAND[@]}"; do
+                  printf "%s\n" "${PICKS[@]}" | grep -qx "$u" && continue
+                  USED_MAP["$u"]=${USED_MAP["$u"]-0}
+                  USED=$(jq -r --arg u "$u" '.quota_usage[$u] // 0' "$TMP_ST")
+                  USED_MAP["$u"]=$USED
+                  [ "$USED" -lt "$QUOTA" ] || continue
+                  ELIG+=("$u")
+                  [ "$USED" -lt "$MIN" ] && MIN="$USED"
+                done
+                [ ${#ELIG[@]} -eq 0 ] && break
+                TIER=()
+                for u in "${ELIG[@]}"; do
+                  if [ "${USED_MAP[$u]}" -eq "$MIN" ]; then
+                    TIER+=("$u")
+                  fi
+                done
+                PICK=$(printf "%s\n" "${TIER[@]}" | shuf -n1)
+                PICKS+=("$PICK")
+                jq --arg u "$PICK" '.quota_usage[$u] = ((.quota_usage[$u] // 0) + 1)' "$TMP_ST" > _tmp.json && mv _tmp.json "$TMP_ST"
               done
               COUNT=${#PICKS[@]}
+              rm -f "$TMP_ST"
               if [ $COUNT -eq 0 ]; then
                 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
                 MSG="❌ [AUTO][$NOW][$KEY] 리뷰어 배정 실패(쿼터/제외 충돌)"
                 if [ "$CTYPE" = "Issue" ] || [ "$CTYPE" = "PullRequest" ]; then
-                  gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments -f body="$MSG" >/dev/null || true
+                  gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments \
+                    --raw-field body="$MSG" >/dev/null || true
                 fi
                 continue
               fi
@@ -283,11 +307,17 @@ jobs:
                 REV="@${PICKS[0]}, @${PICKS[1]}"
               fi
 
-              # Reviewers(auto) 텍스트 필드 업데이트 (GraphQL)
+              # Reviewers(auto) 텍스트 필드 업데이트
               M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){
-                updateProjectV2ItemFieldValue(input:{projectId:$pid,itemId:$item,fieldId:$fid,value:{text:$text}}){
+                updateProjectV2ItemFieldValue(input:{
+                  projectId:$pid,
+                  itemId:$item,
+                  fieldId:$fid,
+                  value:{text:$text}
+                }){
                   clientMutationId
-                }}'
+                }
+              }'
               for vname in PROJECT_ID ITEM_ID RV_FIELD_ID; do
                 eval "v=\${$vname}"
                 if [ -z "$v" ]; then
@@ -304,14 +334,12 @@ jobs:
                 '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, text:$text}}' \
               | gh api graphql --input - >/dev/null
 
-              # 결과 코멘트 (Issue/PR에만, 멀티라인 포맷)
               if [ $COUNT -ge 1 ]; then
                 P0="${PICKS[0]}"
                 USED0=$(jq -r --arg u "$P0" '.quota_usage[$u] // 0' "$ST")
                 NEW0=$((USED0 + 1))
                 LINE0="@${P0} (${NEW0}/${QUOTA})"
               fi
-
               if [ $COUNT -ge 2 ]; then
                 P1="${PICKS[1]}"
                 USED1=$(jq -r --arg u "$P1" '.quota_usage[$u] // 0' "$ST")
@@ -321,7 +349,6 @@ jobs:
 
               NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-              # ✅ 멀티라인 메시지 구성
               if [ $COUNT -eq 1 ]; then
                 MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정\n스프린트: $SPRINT\n\n$LINE0"
               else
@@ -334,15 +361,9 @@ jobs:
                   --raw-field body="$MSG" >/dev/null || true
               fi
 
-              # state 업데이트
-              if [ $COUNT -ge 1 ]; then
-                P0="${PICKS[0]}"
-                jq --arg u "$P0" '.quota_usage[$u] = ((.quota_usage[$u] // 0) + 1)' "$ST" > _st.json && mv _st.json "$ST"
-              fi
-              if [ $COUNT -ge 2 ]; then
-                P1="${PICKS[1]}"
-                jq --arg u "$P1" '.quota_usage[$u] = ((.quota_usage[$u] // 0) + 1)' "$ST" > _st.json && mv _st.json "$ST"
-              fi
+              for u in "${PICKS[@]}"; do
+                jq --arg u "$u" '.quota_usage[$u] = ((.quota_usage[$u] // 0) + 1)' "$ST" > _st.json && mv _st.json "$ST"
+              done
               jq --arg id "$ITEM_ID" --arg s "$SPRINT" --argjson q "$QUOTA" '
                 .processed_card_ids |= ( . + [$id] | unique )
                 | .last_run_at = "'$NOW'"
@@ -351,13 +372,12 @@ jobs:
               ' "$ST" > _st.json && mv _st.json "$ST"
 
             done < items.b64
+            trap - EXIT ERR
 
-            # ---- 커밋 & 푸시 ----
             git config --global safe.directory "$GITHUB_WORKSPACE"
             git config user.name  "project-hub-bot"
             git config user.email "bot@users.noreply.github.com"
 
-            # state 디렉토리 최초 트래킹 (untracked 보호)
             if ! git ls-files --error-unmatch state >/dev/null 2>&1; then
               mkdir -p state
               touch state/.gitkeep
@@ -367,7 +387,6 @@ jobs:
               git push || true
             fi
 
-            # 변경이 있는 경우에만 커밋/푸시
             git add -A state/
             if git diff --cached --quiet -- state/ ; then
               echo "No state changes to commit"
