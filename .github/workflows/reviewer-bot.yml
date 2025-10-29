@@ -304,11 +304,34 @@ jobs:
                 '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, text:$text}}' \
               | gh api graphql --input - >/dev/null
 
-              # 결과 코멘트 (Issue/PR에만)
+              # 결과 코멘트 (Issue/PR에만, 멀티라인 포맷)
+              if [ $COUNT -ge 1 ]; then
+                P0="${PICKS[0]}"
+                USED0=$(jq -r --arg u "$P0" '.quota_usage[$u] // 0' "$ST")
+                NEW0=$((USED0 + 1))
+                LINE0="@${P0} (${NEW0}/${QUOTA})"
+              fi
+
+              if [ $COUNT -ge 2 ]; then
+                P1="${PICKS[1]}"
+                USED1=$(jq -r --arg u "$P1" '.quota_usage[$u] // 0' "$ST")
+                NEW1=$((USED1 + 1))
+                LINE1="@${P1} (${NEW1}/${QUOTA})"
+              fi
+
               NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-              MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정: $REV · 스프린트: $SPRINT · 쿼터: $QUOTA/인"
+
+              # ✅ 멀티라인 메시지 구성
+              if [ $COUNT -eq 1 ]; then
+                MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정\n스프린트: $SPRINT\n\n$LINE0"
+              else
+                MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정\n스프린트: $SPRINT\n\n$LINE0\n$LINE1"
+              fi
+
+              # 줄바꿈 처리를 위해 -f body="$MSG" 대신 --raw-field body="$MSG" 사용
               if [ "$CTYPE" = "Issue" ] || [ "$CTYPE" = "PullRequest" ]; then
-                gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments -f body="$MSG" >/dev/null || true
+                gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments \
+                  --raw-field body="$MSG" >/dev/null || true
               fi
 
               # state 업데이트
