@@ -1,12 +1,15 @@
 {
   "quota_usage": {
     "jade653": 1,
-    "daoauth": 1
+    "daoauth": 1,
+    "guboc11": 1,
+    "parksol2004": 1
   },
   "processed_card_ids": [
+    "PVTI_lADODc3yn84BEdTSzggGBNA",
     "PVTI_lADODc3yn84BEdTSzggGCOc"
   ],
   "sprint": "2025-W44",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-10-31T06:39:16Z"
+  "last_run_at": "2025-10-31T14:18:54Z"
 }
