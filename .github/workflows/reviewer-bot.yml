@@ -350,9 +350,11 @@ jobs:
               NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
               if [ $COUNT -eq 1 ]; then
-                MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정\n스프린트: $SPRINT\n\n$LINE0"
+                printf -v MSG '✅ [AUTO][%s][%s] 리뷰어 자동 배정\n스프린트: %s\n\n%s' \
+                  "$NOW" "$KEY" "$SPRINT" "$LINE0"
               else
-                MSG="✅ [AUTO][$NOW][$KEY] 리뷰어 자동 배정\n스프린트: $SPRINT\n\n$LINE0\n$LINE1"
+                printf -v MSG '✅ [AUTO][%s][%s] 리뷰어 자동 배정\n스프린트: %s\n\n%s\n%s' \
+                  "$NOW" "$KEY" "$SPRINT" "$LINE0" "$LINE1"
               fi
 
               # 줄바꿈 처리를 위해 -f body="$MSG" 대신 --raw-field body="$MSG" 사용
