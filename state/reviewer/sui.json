@@ -5,14 +5,17 @@
     "guboc11": 1,
     "parksol2004": 1,
     "devan-ko": 1,
-    "nubro999": 1
+    "nubro999": 1,
+    "gkfyr": 1,
+    "roode1017": 1
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzggGBNA",
     "PVTI_lADODc3yn84BEdTSzggGCLU",
-    "PVTI_lADODc3yn84BEdTSzggGCOc"
+    "PVTI_lADODc3yn84BEdTSzggGCOc",
+    "PVTI_lADODc3yn84BEdTSzggGC_w"
   ],
   "sprint": "2025-W44",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-11-03T02:53:22Z"
+  "last_run_at": "2025-11-03T04:52:42Z"
 }
