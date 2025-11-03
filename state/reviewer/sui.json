@@ -3,13 +3,16 @@
     "jade653": 1,
     "daoauth": 1,
     "guboc11": 1,
-    "parksol2004": 1
+    "parksol2004": 1,
+    "devan-ko": 1,
+    "nubro999": 1
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzggGBNA",
+    "PVTI_lADODc3yn84BEdTSzggGCLU",
     "PVTI_lADODc3yn84BEdTSzggGCOc"
   ],
   "sprint": "2025-W44",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-10-31T14:18:54Z"
+  "last_run_at": "2025-11-03T02:53:22Z"
 }
