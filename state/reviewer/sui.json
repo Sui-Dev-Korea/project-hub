@@ -1,7 +1,7 @@
 {
   "quota_usage": {
-    "jade653": 1,
-    "daoauth": 1,
+    "jade653": 2,
+    "daoauth": 2,
     "guboc11": 2,
     "parksol2004": 2,
     "devan-ko": 2,
@@ -15,10 +15,11 @@
     "PVTI_lADODc3yn84BEdTSzggGC3Q",
     "PVTI_lADODc3yn84BEdTSzggGCLU",
     "PVTI_lADODc3yn84BEdTSzggGCOc",
+    "PVTI_lADODc3yn84BEdTSzggGCR4",
     "PVTI_lADODc3yn84BEdTSzggGC_w",
     "PVTI_lADODc3yn84BEdTSzggGCvE"
   ],
   "sprint": "2025-W44",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-11-04T09:40:17Z"
+  "last_run_at": "2025-11-05T02:27:59Z"
 }
