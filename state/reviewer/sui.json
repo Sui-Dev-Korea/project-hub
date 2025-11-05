@@ -5,15 +5,16 @@
     "guboc11": 2,
     "parksol2004": 2,
     "devan-ko": 2,
-    "nubro999": 2,
+    "nubro999": 3,
     "gkfyr": 3,
-    "roode1017": 2
+    "roode1017": 3
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzgfYTBw",
     "PVTI_lADODc3yn84BEdTSzggGB5o",
     "PVTI_lADODc3yn84BEdTSzggGBNA",
     "PVTI_lADODc3yn84BEdTSzggGC3Q",
+    "PVTI_lADODc3yn84BEdTSzggGCH4",
     "PVTI_lADODc3yn84BEdTSzggGCLU",
     "PVTI_lADODc3yn84BEdTSzggGCOc",
     "PVTI_lADODc3yn84BEdTSzggGCR4",
@@ -22,5 +23,5 @@
   ],
   "sprint": "2025-W44",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-11-05T04:40:38Z"
+  "last_run_at": "2025-11-05T18:14:43Z"
 }
