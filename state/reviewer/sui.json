@@ -4,15 +4,16 @@
     "jade653": 2,
     "parksol2004": 2,
     "roode1017": 3,
-    "devan-ko": 2,
+    "devan-ko": 3,
     "gkfyr": 2,
     "nubro999": 2,
-    "daoauth": 1
+    "daoauth": 2
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzgg4Prw",
     "PVTI_lADODc3yn84BEdTSzgg4QBg",
     "PVTI_lADODc3yn84BEdTSzgg4R44",
+    "PVTI_lADODc3yn84BEdTSzgg4Ryc",
     "PVTI_lADODc3yn84BEdTSzgg4S8c",
     "PVTI_lADODc3yn84BEdTSzgg4SQM",
     "PVTI_lADODc3yn84BEdTSzgg4SXw",
@@ -21,5 +22,5 @@
   ],
   "sprint": "2025-W46",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-11-12T07:23:06Z"
+  "last_run_at": "2025-11-14T08:13:06Z"
 }
