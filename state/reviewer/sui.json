@@ -6,8 +6,8 @@
     "roode1017": 3,
     "devan-ko": 3,
     "gkfyr": 2,
-    "nubro999": 2,
-    "daoauth": 2
+    "nubro999": 3,
+    "daoauth": 3
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzgg4Prw",
@@ -18,10 +18,11 @@
     "PVTI_lADODc3yn84BEdTSzgg4SQM",
     "PVTI_lADODc3yn84BEdTSzgg4SXw",
     "PVTI_lADODc3yn84BEdTSzgg4TCg",
+    "PVTI_lADODc3yn84BEdTSzggF4gY",
     "PVTI_lADODc3yn84BEdTSzggGAXU",
     "PVTI_lADODc3yn84BEdTSzggGBYI"
   ],
   "sprint": "2025-W46",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-11-19T05:54:12Z"
+  "last_run_at": "2025-11-19T13:21:55Z"
 }
