@@ -1,30 +1,12 @@
 {
   "quota_usage": {
-    "guboc11": 3,
-    "jade653": 3,
-    "parksol2004": 3,
-    "roode1017": 3,
-    "devan-ko": 4,
-    "gkfyr": 3,
-    "nubro999": 3,
-    "daoauth": 4
+    "jade653": 1,
+    "devan-ko": 1
   },
   "processed_card_ids": [
-    "PVTI_lADODc3yn84BEdTSzgg4OOc",
-    "PVTI_lADODc3yn84BEdTSzgg4Prw",
-    "PVTI_lADODc3yn84BEdTSzgg4QBg",
-    "PVTI_lADODc3yn84BEdTSzgg4R44",
-    "PVTI_lADODc3yn84BEdTSzgg4Ryc",
-    "PVTI_lADODc3yn84BEdTSzgg4S8c",
-    "PVTI_lADODc3yn84BEdTSzgg4SQM",
-    "PVTI_lADODc3yn84BEdTSzgg4SXw",
-    "PVTI_lADODc3yn84BEdTSzgg4TCg",
-    "PVTI_lADODc3yn84BEdTSzggF4gY",
-    "PVTI_lADODc3yn84BEdTSzggGAXU",
-    "PVTI_lADODc3yn84BEdTSzggGBYI",
-    "PVTI_lADODc3yn84BEdTSzggGCxY"
+    "PVTI_lADODc3yn84BEdTSzggF4VY"
   ],
-  "sprint": "2025-W48",
+  "sprint": "2025-W46",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-11-20T07:59:06Z"
+  "last_run_at": "2025-11-30T06:47:18Z"
 }
