@@ -236,6 +236,7 @@ jobs:
                   ] | .[0] // ""
                 ) as $rv_raw
               | ($rv_raw
+                  | gsub("[\\r\\n]+"; ",")
                   | gsub("@";"")
                   | split(",")
                   | map(gsub("\\s+"; "") | ascii_downcase)
@@ -343,8 +344,12 @@ jobs:
               fi
 
               ALL=("${EXISTING[@]}" "${PICKS[@]}")
-              REV=$(printf "@%s, " "${ALL[@]}")
-              REV=${REV%, }
+              CLEANED=()
+              for a in "${ALL[@]}"; do
+                a=$(printf "%s" "$a" | tr -d '\r\n' | sed 's/^@//')
+                [ -n "$a" ] && CLEANED+=("$a")
+              done
+              REV=$(printf "%s" "$(printf "@%s\n" "${CLEANED[@]}" | paste -sd', ' -)")
 
               # Reviewers(auto) 텍스트 필드 업데이트
               M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){
