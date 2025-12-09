@@ -174,33 +174,35 @@ jobs:
                | select((.name|test("(?i)^status\\s*$")) and .__typename=="ProjectV2SingleSelectField")
                | .options[].name]
             ' fields.json)
-            STATUS_FIELD_ID=$(jq -r '
-              .data.node.fields.nodes[]
-              | select((.name|test("(?i)^status\\s*$")) and .__typename=="ProjectV2SingleSelectField")
-              | .id
+            STATUS_FIELD_IDS_JSON=$(jq -c '
+              [.data.node.fields.nodes[]
+               | select((.name|test("(?i)^status\\s*$")) and .__typename=="ProjectV2SingleSelectField")
+               | .id]
+              | map(select(.!=null and .!=""))
+              | unique
             ' fields.json)
-            if [ -z "${STATUS_FIELD_ID:-}" ] || [ "$STATUS_FIELD_ID" = "null" ]; then
+            if [ -z "${STATUS_FIELD_IDS_JSON:-}" ] || [ "$STATUS_FIELD_IDS_JSON" = "[]" ]; then
               echo "WARN: Status 필드를 찾지 못해 $KEY 스킵"
               echo "::endgroup::"
               continue
             fi
 
-            IN_REVIEW_COUNT=$(jq -r --arg sid "$STATUS_FIELD_ID" '
+            IN_REVIEW_COUNT=$(jq -r --argjson sids "$STATUS_FIELD_IDS_JSON" '
               [.data.node.items.nodes[]
                | {fields: .fieldValues.nodes}
                | select(
                    (.fields
-                     | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and .field.id == $sid))
+                     | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and ((.field.id // "") as $fid | ($sids | index($fid)))))
                      | map(.name // "" | gsub("^\\s+|\\s+$";"") | ascii_downcase)
-                     | map(ascii_downcase)) as $vals
+                    ) as $vals
                    | ($vals | index("in review"))
                  )
               ] | length
             ' proj.json)
-            STATUS_DIST=$(jq -r --arg sid "$STATUS_FIELD_ID" '
+            STATUS_DIST=$(jq -r --argjson sids "$STATUS_FIELD_IDS_JSON" '
               [.data.node.items.nodes[]
                | .fieldValues.nodes[]
-               | select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and .field.id == $sid)
+               | select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and ((.field.id // "") as $fid | ($sids | index($fid))))
                | (.name // "" | gsub("^\\s+|\\s+$";"") | ascii_downcase)
                | select(.!="")
               ] | sort | unique | join(", ")
@@ -229,7 +231,7 @@ jobs:
             fi
 
             # ---- 대상 아이템 추출 ----
-            jq -r --argjson sopts "${STATUS_OPTS_JSON:-[]}" --arg sid "$STATUS_FIELD_ID" --argjson needed '"$REVIEWERS_NEEDED"' '
+            jq -r --argjson sopts "${STATUS_OPTS_JSON:-[]}" --argjson sid "${STATUS_FIELD_IDS_JSON}" --argjson needed '"$REVIEWERS_NEEDED"' '
               .data.node.items.nodes[]
               | {id, content: .content, fields: .fieldValues.nodes}
 
@@ -251,7 +253,7 @@ jobs:
               # Status = "In review" 인 카드만 (대소문자 무시 + 옵션 검증)
               | select(
                   (.fields
-                    | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and .field.id == $sid))
+                    | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and ((.field.id // "") as $fid | ($sid | index($fid)))))
                     | map(.name // "" | gsub("^\\s+|\\s+$";"") | ascii_downcase)
                   ) as $vals
                   | ($vals | index("in review"))
