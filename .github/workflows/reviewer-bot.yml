@@ -100,16 +100,11 @@ jobs:
             QUOTA=$((QUOTA + 0))
 
             # ---- 프로젝트 스냅샷 (필드 + 아이템) ----
-            READ_Q='query($pid:ID!){
+            READ_Q='query($pid:ID!,$after:String){
               node(id:$pid){
                 ... on ProjectV2{
-                  fields(first:50){
-                    nodes{
-                      __typename
-                      ... on ProjectV2Field { id name dataType }
-                    }
-                  }
-                  items(first:100){
+                  items(first:50, after:$after){
+                    pageInfo{ hasNextPage endCursor }
                     nodes{
                       id
                       content{
@@ -139,9 +134,22 @@ jobs:
                 }
               }
             }'
-            jq -nc --arg q "$READ_Q" --arg pid "$PROJECT_ID" \
-              '{query:$q, variables:{pid:$pid}}' \
-            | gh api graphql --input - > proj.json
+            echo '{"data":{"node":{"items":{"nodes":[]}}}}' > proj.json
+            AFTER=""
+            while :; do
+              jq -nc --arg q "$READ_Q" --arg pid "$PROJECT_ID" --arg after "$AFTER" \
+                '{query:$q, variables:{pid:$pid, after:($after|length>0 ? $after : null)}}' \
+              | gh api graphql --input - > page.json
+
+              jq --slurpfile p page.json '
+                .data.node.items.nodes += ($p[0].data.node.items.nodes)
+              ' proj.json > _tmp.json && mv _tmp.json proj.json
+
+              HAS_NEXT=$(jq -r '.data.node.items.pageInfo.hasNextPage' page.json)
+              AFTER=$(jq -r '.data.node.items.pageInfo.endCursor // ""' page.json)
+              [ "$HAS_NEXT" = "true" ] || break
+            done
+            rm -f page.json
 
             # ---- Status 옵션 조회 (대소문자/공백 안전) ----
             FQ='query($pid:ID!){
@@ -166,8 +174,18 @@ jobs:
                | select((.name|test("(?i)^status\\s*$")) and .__typename=="ProjectV2SingleSelectField")
                | .options[].name]
             ' fields.json)
+            STATUS_FIELD_ID=$(jq -r '
+              .data.node.fields.nodes[]
+              | select((.name|test("(?i)^status\\s*$")) and .__typename=="ProjectV2SingleSelectField")
+              | .id
+            ' fields.json)
+            if [ -z "${STATUS_FIELD_ID:-}" ] || [ "$STATUS_FIELD_ID" = "null" ]; then
+              echo "WARN: Status 필드를 찾지 못해 $KEY 스킵"
+              echo "::endgroup::"
+              continue
+            fi
 
-            RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' proj.json)
+            RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' fields.json)
             if [ -z "$RV_FIELD_ID" ] || [ "$RV_FIELD_ID" = "null" ]; then
               echo "WARN: Reviewers(auto) 필드가 없어 $KEY 스킵"
               echo "::endgroup::"
@@ -188,10 +206,8 @@ jobs:
               ' "$ST" > _st.json && mv _st.json "$ST"
             fi
 
-            PROCESSED=$(jq -c '.processed_card_ids' "$ST")
-
             # ---- 대상 아이템 추출 ----
-            jq -r --argjson done "$PROCESSED" --argjson sopts "${STATUS_OPTS_JSON:-[]}" '
+            jq -r --argjson sopts "${STATUS_OPTS_JSON:-[]}" --arg sid "$STATUS_FIELD_ID" --argjson needed '"$REVIEWERS_NEEDED"' '
               .data.node.items.nodes[]
               | {id, content: .content, fields: .fieldValues.nodes}
 
@@ -201,30 +217,28 @@ jobs:
                     | select((.field.name? // "") | test("(?i)^reviewers\\(auto\\)\\s*$"))
                     | .text // ""
                   ] | .[0] // ""
-                ) as $rv
-              | ($rv | gsub("\\s+"; "") | ascii_downcase) as $rv_trim
-
-              # processed되어 있어도 Reviewers(auto)가 비면 재처리
-              | select(($rv_trim == "") or (.id as $id | ($done | index($id)) | not))
+                ) as $rv_raw
+              | ($rv_raw
+                  | gsub("@";"")
+                  | split(",")
+                  | map(gsub("\\s+"; "") | ascii_downcase)
+                  | map(select(. != ""))
+                ) as $rv_arr
+              | ($rv_arr | length) as $rv_count
 
               # Status = "In review" 인 카드만 (대소문자 무시 + 옵션 검증)
               | select(
                   (.fields
-                    | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
+                    | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and .field.id == $sid))
                     | map(.name // "")
                     | map(ascii_downcase)) as $vals
                   | ($vals | index("in review"))
-                  and (
-                    (.fields
-                      | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue"))
-                      | map(.name // "")) as $names
-                    | any($names[]; ($sopts | index(.)))
-                  )
                 )
 
-              # 정말로 reviewers(auto)가 비어있는 것만
-              | select($rv_trim == "")
+              # 필요한 리뷰어 수보다 적게 배정된 카드만
+              | select($rv_count < $needed)
 
+              | {id, content, fields, reviewers:$rv_arr, rv_raw:$rv_raw}
               | @base64
             ' proj.json > items.b64
 
@@ -243,6 +257,9 @@ jobs:
                 (.fields[] | select(.field.name=="Assignee")  | .users.nodes[0].login // empty),
                 (.fields[] | select(.field.name=="Assignees") | .users.nodes[0].login // empty)
               ' | head -n1)
+              mapfile -t EXISTING < <(echo "$J" | jq -r '.reviewers[]?')
+              EXISTING_COUNT=${#EXISTING[@]}
+              NEED=$((REVIEWERS_NEEDED - EXISTING_COUNT))
 
               if [ -z "$ASSIGNEE" ]; then
                 echo "Skip card $ITEM_ID (no Assignee)"
@@ -258,6 +275,7 @@ jobs:
                 [ -z "$u" ] && continue
                 echo " $EXC " | grep -qw " $u " && continue
                 [ "$u" = "$ASSIGNEE" ] && continue
+                printf "%s\n" "${EXISTING[@]}" | grep -qx "$u" && continue
                 CAND+=("$u")
               done
 
@@ -265,7 +283,7 @@ jobs:
               TMP_ST="$ST.tmp"
               cp "$ST" "$TMP_ST"
 
-              for i in $(seq 1 $REVIEWERS_NEEDED); do
+              for i in $(seq 1 $NEED); do
                 ELIG=()
                 MIN=999999
                 declare -A USED_MAP
@@ -301,11 +319,9 @@ jobs:
                 continue
               fi
 
-              if [ $COUNT -eq 1 ]; then
-                REV="@${PICKS[0]}"
-              else
-                REV="@${PICKS[0]}, @${PICKS[1]}"
-              fi
+              ALL=("${EXISTING[@]}" "${PICKS[@]}")
+              REV=$(printf "@%s, " "${ALL[@]}")
+              REV=${REV%, }
 
               # Reviewers(auto) 텍스트 필드 업데이트
               M='mutation($pid:ID!,$item:ID!,$fid:ID!,$text:String!){
@@ -366,12 +382,17 @@ jobs:
               for u in "${PICKS[@]}"; do
                 jq --arg u "$u" '.quota_usage[$u] = ((.quota_usage[$u] // 0) + 1)' "$ST" > _st.json && mv _st.json "$ST"
               done
-              jq --arg id "$ITEM_ID" --arg s "$SPRINT" --argjson q "$QUOTA" '
-                .processed_card_ids |= ( . + [$id] | unique )
-                | .last_run_at = "'$NOW'"
+              TOTAL=$((EXISTING_COUNT + COUNT))
+              jq --arg s "$SPRINT" --argjson q "$QUOTA" '
+                .last_run_at = "'$NOW'"
                 | .sprint = $s
                 | .quota_per_sprint = $q
               ' "$ST" > _st.json && mv _st.json "$ST"
+              if [ $TOTAL -ge $REVIEWERS_NEEDED ]; then
+                jq --arg id "$ITEM_ID" '
+                  .processed_card_ids |= ( . + [$id] | unique )
+                ' "$ST" > _st.json && mv _st.json "$ST"
+              fi
 
             done < items.b64
             trap - EXIT ERR
