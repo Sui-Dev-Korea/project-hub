@@ -191,13 +191,21 @@ jobs:
                | select(
                    (.fields
                      | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and .field.id == $sid))
-                     | map(.name // "")
+                     | map(.name // "" | gsub("^\\s+|\\s+$";"") | ascii_downcase)
                      | map(ascii_downcase)) as $vals
                    | ($vals | index("in review"))
                  )
               ] | length
             ' proj.json)
-            echo "Status=In review count: ${IN_REVIEW_COUNT}"
+            STATUS_DIST=$(jq -r --arg sid "$STATUS_FIELD_ID" '
+              [.data.node.items.nodes[]
+               | .fieldValues.nodes[]
+               | select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and .field.id == $sid)
+               | (.name // "" | gsub("^\\s+|\\s+$";"") | ascii_downcase)
+               | select(.!="")
+              ] | sort | unique | join(", ")
+            ' proj.json)
+            echo "Status=In review count: ${IN_REVIEW_COUNT} (distinct: ${STATUS_DIST:-none})"
 
             RV_FIELD_ID=$(jq -r '.data.node.fields.nodes[] | select(.name=="Reviewers(auto)") | .id' fields.json)
             if [ -z "$RV_FIELD_ID" ] || [ "$RV_FIELD_ID" = "null" ]; then
@@ -244,8 +252,8 @@ jobs:
               | select(
                   (.fields
                     | map(select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and .field.id == $sid))
-                    | map(.name // "")
-                    | map(ascii_downcase)) as $vals
+                    | map(.name // "" | gsub("^\\s+|\\s+$";"") | ascii_downcase)
+                  ) as $vals
                   | ($vals | index("in review"))
                 )
 
