@@ -334,12 +334,13 @@ jobs:
               COUNT=${#PICKS[@]}
               rm -f "$TMP_ST"
               if [ $COUNT -eq 0 ]; then
-                NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                MSG="❌ [AUTO][$NOW][$KEY] 리뷰어 배정 실패(쿼터/제외 충돌)"
-                if [ "$CTYPE" = "Issue" ] || [ "$CTYPE" = "PullRequest" ]; then
-                  gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments \
-                    --raw-field body="$MSG" >/dev/null || true
-                fi
+                # 경고 코멘트는 일단 비활성화
+                # NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                # MSG="❌ [AUTO][$NOW][$KEY] 리뷰어 배정 실패(쿼터/제외 충돌)"
+                # if [ "$CTYPE" = "Issue" ] || [ "$CTYPE" = "PullRequest" ]; then
+                #   gh api repos/$REPO_NWO/issues/$(basename "$ISSUE_URL")/comments \
+                #     --raw-field body="$MSG" >/dev/null || true
+                # fi
                 continue
               fi
 
