@@ -138,7 +138,7 @@ jobs:
             AFTER=""
             while :; do
               jq -nc --arg q "$READ_Q" --arg pid "$PROJECT_ID" --arg after "$AFTER" \
-                '{query:$q, variables:{pid:$pid, after:($after|length>0 ? $after : null)}}' \
+                '{query:$q, variables:{pid:$pid, after:($after | if length>0 then . else null end)}}' \
               | gh api graphql --input - > page.json
 
               jq --slurpfile p page.json '
