@@ -150,8 +150,8 @@ jobs:
                 echo "Skip (no link) :: $TITLE"
                 continue
               fi
-              if ! echo "$LINK" | grep -qiE '\.md($|[?#])'; then
-                echo "Skip (not md) :: $LINK"
+              if ! echo "$LINK" | grep -qiE '\.mdx($|[?#])'; then
+                echo "Skip (not mdx) :: $LINK"
                 continue
               fi
 
