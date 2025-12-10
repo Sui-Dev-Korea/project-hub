@@ -14,9 +14,9 @@ eligible_pool:
   - gkfyr
   - guboc11
   - jade653
+  - neonmintweb3
   - parksol2004
   - roode1017
-  - neonmintweb3
 
 # 제외 규칙
 exclude_rules:
