@@ -91,6 +91,34 @@ jobs:
               exit 1
             fi
 
+            FQ='query($pid:ID!){
+              node(id:$pid){
+                ... on ProjectV2{
+                  fields(first:50){
+                    nodes{
+                      __typename
+                      ... on ProjectV2SingleSelectField { id name options { id name } }
+                    }
+                  }
+                }
+              }
+            }'
+            jq -nc --arg q "$FQ" --arg pid "$PROJECT_ID" \
+              '{query:$q, variables:{pid:$pid}}' \
+            | gh api graphql --input - > fields.json
+
+            SIZE_FIELD_ID=$(jq -r '
+              .data.node.fields.nodes[]
+              | select((.name // "" | ascii_downcase) == "size" and .__typename=="ProjectV2SingleSelectField")
+              | .id
+            ' fields.json)
+            SIZE_OPTS=$(jq -c '
+              [.data.node.fields.nodes[]
+               | select((.name // "" | ascii_downcase) == "size" and .__typename=="ProjectV2SingleSelectField")
+               | .options[]
+               | {name:(.name // "" | ascii_downcase), id}]
+            ' fields.json)
+
             READ_Q='query($pid:ID!,$after:String){
               node(id:$pid){
                 ... on ProjectV2{
@@ -130,7 +158,7 @@ jobs:
             jq -r '
               .data.node.items.nodes[]
               | select(.content != null)
-              | {type: .content.__typename, title: .content.title, body: .content.body, url: .content.url, repo: .content.repository.nameWithOwner}
+              | {id, type: .content.__typename, title: .content.title, body: .content.body, url: .content.url, repo: .content.repository.nameWithOwner}
               | @base64
             ' proj.json > items.b64
 
@@ -142,6 +170,7 @@ jobs:
 
             while read -r ROW; do
               J=$(echo "$ROW" | base64 -d)
+              ITEM_ID=$(echo "$J" | jq -r '.id')
               TYPE=$(echo "$J" | jq -r '.type // "UNKNOWN"')
               TITLE=$(echo "$J" | jq -r '.title // ""' | tr '\r\n' ' ')
               BODY=$(echo "$J" | jq -r '.body // ""')
@@ -185,6 +214,45 @@ jobs:
                 SIZE="M"
               elif [ "$LINES" -le 600 ]; then
                 SIZE="L"
+              fi
+
+              if [ -n "${SIZE_FIELD_ID:-}" ] && [ "$SIZE_FIELD_ID" != "null" ]; then
+                CURRENT_SIZE_OPT=$(jq -r '
+                  .data.node.items.nodes[]
+                  | select(.content != null and .id=="'"$ITEM_ID"'")
+                  | .fieldValues.nodes[]
+                  | select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and (.field.name // "" | ascii_downcase)=="size")
+                  | .name // ""
+                ' proj.json)
+                if [ -n "$CURRENT_SIZE_OPT" ]; then
+                  echo "Skip size update (already set: $CURRENT_SIZE_OPT) :: $TITLE"
+                else
+                  OPT_ID=$(printf "%s" "$SIZE_OPTS" | jq -r --arg s "$(echo "$SIZE" | tr '[:upper:]' '[:lower:]')" '
+                    [.[] | select(.name==$s) | .id][0] // empty
+                  ')
+                  if [ -n "$OPT_ID" ]; then
+                    M='mutation($pid:ID!,$item:ID!,$fid:ID!,$opt:ID!){
+                      updateProjectV2ItemFieldValue(input:{
+                        projectId:$pid,
+                        itemId:$item,
+                        fieldId:$fid,
+                        value:{singleSelectOptionId:$opt}
+                      }){
+                        clientMutationId
+                      }
+                    }'
+                    jq -nc \
+                      --arg q "$M" \
+                      --arg pid  "$PROJECT_ID" \
+                      --arg item "$ITEM_ID" \
+                      --arg fid  "$SIZE_FIELD_ID" \
+                      --arg opt  "$OPT_ID" \
+                      '{query:$q, variables:{pid:$pid, item:$item, fid:$fid, opt:$opt}}' \
+                    | gh api graphql --input - >/dev/null || true
+                  else
+                    echo "Size option not found for $SIZE (field exists) :: $TITLE"
+                  fi
+                fi
               fi
 
               printf 'Project=%s | Type=%s | Title=%s | File=%s | Lines=%s | Size=%s\n' "$KEY" "$TYPE" "$TITLE" "$FILE_NAME" "$LINES" "$SIZE"
