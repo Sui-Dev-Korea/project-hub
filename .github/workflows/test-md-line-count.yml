@@ -1,0 +1,185 @@
+name: test-md-line-count
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  repository-projects: read
+
+env:
+  TZ: Asia/Seoul
+  BOT_NAME: reviewer
+  GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+
+jobs:
+  count-lines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          curl -sSL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+
+      - name: Ensure gh auth
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+            export GH_TOKEN="${GITHUB_TOKEN}"
+          fi
+          if gh auth status >/dev/null 2>&1; then
+            exit 0
+          fi
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "GH_TOKEN/GITHUB_TOKEN is required" >&2
+            exit 1
+          fi
+          gh auth login --with-token <<<"${GH_TOKEN}"
+
+      - name: Scan reviewer projects for md links
+        run: |
+          set -euo pipefail
+
+          ls ".github/config/${BOT_NAME}/"*.yml 2>/dev/null | sed 's#.*/##; s#\.yml$##' > projects.txt || true
+          COUNT=$(wc -l < projects.txt | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No configs under .github/config/${BOT_NAME} — nothing to scan."
+            exit 0
+          fi
+
+          printf '|Project|Item Type|Title|File|Lines|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
+
+          while read -r KEY; do
+            [ -z "$KEY" ] && continue
+            echo "::group::Project = $KEY"
+
+            CFG=".github/config/${BOT_NAME}/${KEY}.yml"
+            ORG=$(yq -r '.project_org // ""' "$CFG")
+            NUM=$(yq -r '.project_number // ""' "$CFG")
+            if [ -z "$ORG" ] || [ -z "$NUM" ]; then
+              echo "[ERR] project_org/number missing in $CFG"
+              exit 1
+            fi
+
+            Q_ID='query($org:String!,$num:Int!){
+              organization(login:$org){
+                projectV2(number:$num){
+                  id title
+                }
+              }
+            }'
+            PROJECT_ID=$(jq -nc --arg q "$Q_ID" --arg org "$ORG" --argjson num "$NUM" \
+              '{query:$q,variables:{org:$org,num:$num}}' \
+            | gh api graphql --input - \
+            | jq -r '.data.organization.projectV2.id // empty')
+            if [ -z "$PROJECT_ID" ]; then
+              echo "[ERR] Failed to resolve Project ID for $ORG #$NUM"
+              exit 1
+            fi
+
+            READ_Q='query($pid:ID!,$after:String){
+              node(id:$pid){
+                ... on ProjectV2{
+                  items(first:50, after:$after){
+                    pageInfo{ hasNextPage endCursor }
+                    nodes{
+                      id
+                      content{
+                        __typename
+                        ... on DraftIssue { title body }
+                        ... on Issue { title body url repository { nameWithOwner } }
+                        ... on PullRequest { title body url repository { nameWithOwner } }
+                      }
+                    }
+                  }
+                }
+              }
+            }'
+
+            echo '{"data":{"node":{"items":{"nodes":[]}}}}' > proj.json
+            AFTER=""
+            while :; do
+              jq -nc --arg q "$READ_Q" --arg pid "$PROJECT_ID" --arg after "$AFTER" \
+                '{query:$q, variables:{pid:$pid, after:($after | if length>0 then . else null end)}}' \
+              | gh api graphql --input - > page.json
+
+              jq --slurpfile p page.json '
+                .data.node.items.nodes += ($p[0].data.node.items.nodes)
+              ' proj.json > _tmp.json && mv _tmp.json proj.json
+
+              HAS_NEXT=$(jq -r '.data.node.items.pageInfo.hasNextPage' page.json)
+              AFTER=$(jq -r '.data.node.items.pageInfo.endCursor // ""' page.json)
+              [ "$HAS_NEXT" = "true" ] || break
+            done
+            rm -f page.json
+
+            jq -r '
+              .data.node.items.nodes[]
+              | select(.content != null)
+              | {type: .content.__typename, title: .content.title, body: .content.body, url: .content.url, repo: .content.repository.nameWithOwner}
+              | @base64
+            ' proj.json > items.b64
+
+            if [ ! -s items.b64 ]; then
+              echo "No items found for project $KEY"
+              echo "::endgroup::"
+              continue
+            fi
+
+            while read -r ROW; do
+              J=$(echo "$ROW" | base64 -d)
+              TYPE=$(echo "$J" | jq -r '.type // "UNKNOWN"')
+              TITLE=$(echo "$J" | jq -r '.title // ""' | tr '\r\n' ' ')
+              BODY=$(echo "$J" | jq -r '.body // ""')
+
+              FIRST=$(printf "%s\n" "$BODY" | head -n1)
+              LINK=$(printf "%s\n" "$FIRST" | grep -Eo 'https://github.com/[^ )]+' || true)
+              if [ -z "$LINK" ]; then
+                echo "Skip (no link) :: $TITLE"
+                continue
+              fi
+              if ! echo "$LINK" | grep -qiE '\.md($|[?#])'; then
+                echo "Skip (not md) :: $LINK"
+                continue
+              fi
+
+              RAW_URL="$LINK"
+              if echo "$LINK" | grep -q '/blob/'; then
+                RAW_URL=$(printf "%s" "$LINK" | sed 's#https://github.com/#https://raw.githubusercontent.com/#; s#/blob/#/#')
+              fi
+
+              HDR=()
+              if [ -n "${GH_TOKEN:-}" ]; then
+                HDR=(-H "Authorization: Bearer ${GH_TOKEN}")
+              elif [ -n "${GITHUB_TOKEN:-}" ]; then
+                HDR=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+              fi
+
+              if ! curl -sSL "${HDR[@]}" "$RAW_URL" -o tmp.md; then
+                echo "Fetch failed :: $RAW_URL"
+                continue
+              fi
+
+              LINES=$(wc -l < tmp.md | tr -d ' ')
+              FILE_NAME=$(basename "$LINK")
+
+              printf 'Project=%s | Type=%s | Title=%s | File=%s | Lines=%s\n' "$KEY" "$TYPE" "$TITLE" "$FILE_NAME" "$LINES"
+              printf '|%s|%s|%s|%s|%s|\n' "$KEY" "$TYPE" "$TITLE" "$FILE_NAME" "$LINES" >> "$GITHUB_STEP_SUMMARY"
+
+              rm -f tmp.md
+            done < items.b64
+
+            echo "::endgroup::"
+          done < projects.txt
