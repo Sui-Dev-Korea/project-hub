@@ -241,7 +241,7 @@ jobs:
                     [.[] | select(.name==$s) | .id][0] // empty
                   ')
                   if [ -n "$OPT_ID" ]; then
-                    M='mutation($pid:ID!,$item:ID!,$fid:ID!,$opt:ID!){
+                    M='mutation($pid:ID!,$item:ID!,$fid:ID!,$opt:String!){
                       updateProjectV2ItemFieldValue(input:{
                         projectId:$pid,
                         itemId:$item,
