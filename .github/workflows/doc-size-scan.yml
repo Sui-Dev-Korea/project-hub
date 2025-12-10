@@ -132,6 +132,15 @@ jobs:
                         ... on Issue { title body url repository { nameWithOwner } }
                         ... on PullRequest { title body url repository { nameWithOwner } }
                       }
+                      fieldValues(first:50){
+                        nodes{
+                          __typename
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            name
+                            field { ... on ProjectV2Field { name } }
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -220,7 +229,8 @@ jobs:
                 CURRENT_SIZE_OPT=$(jq -r '
                   .data.node.items.nodes[]
                   | select(.content != null and .id=="'"$ITEM_ID"'")
-                  | .fieldValues.nodes[]
+                  | (.fieldValues.nodes // [])
+                  | .[]
                   | select(.__typename=="ProjectV2ItemFieldSingleSelectValue" and (.field.name // "" | ascii_downcase)=="size")
                   | .name // ""
                 ' proj.json)
