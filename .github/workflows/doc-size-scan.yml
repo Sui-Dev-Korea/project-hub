@@ -1,4 +1,4 @@
-name: test-md-line-count
+name: doc-size-scan
 
 on:
   workflow_dispatch: {}
@@ -58,8 +58,10 @@ jobs:
             exit 0
           fi
 
-          printf '|Project|Item Type|Title|File|Lines|\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '## Size buckets (lines)\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|Size|Lines|\n|-|-|\n|XS|~100|\n|S|101-200|\n|M|201-400|\n|L|401-600|\n|XL|601+|\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|Project|Item Type|Title|File|Lines|Size|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|-|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
 
           while read -r KEY; do
             [ -z "$KEY" ] && continue
@@ -174,8 +176,19 @@ jobs:
               LINES=$(wc -l < tmp.md | tr -d ' ')
               FILE_NAME=$(basename "$LINK")
 
-              printf 'Project=%s | Type=%s | Title=%s | File=%s | Lines=%s\n' "$KEY" "$TYPE" "$TITLE" "$FILE_NAME" "$LINES"
-              printf '|%s|%s|%s|%s|%s|\n' "$KEY" "$TYPE" "$TITLE" "$FILE_NAME" "$LINES" >> "$GITHUB_STEP_SUMMARY"
+              SIZE="XL"
+              if [ "$LINES" -le 100 ]; then
+                SIZE="XS"
+              elif [ "$LINES" -le 200 ]; then
+                SIZE="S"
+              elif [ "$LINES" -le 400 ]; then
+                SIZE="M"
+              elif [ "$LINES" -le 600 ]; then
+                SIZE="L"
+              fi
+
+              printf 'Project=%s | Type=%s | Title=%s | File=%s | Lines=%s | Size=%s\n' "$KEY" "$TYPE" "$TITLE" "$FILE_NAME" "$LINES" "$SIZE"
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "$TYPE" "$TITLE" "$FILE_NAME" "$LINES" "$SIZE" >> "$GITHUB_STEP_SUMMARY"
 
               rm -f tmp.md
             done < items.b64
