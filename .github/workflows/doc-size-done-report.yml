@@ -114,8 +114,12 @@ jobs:
                | .options[].name
                | (.| gsub("^\\s+|\\s+$";"") | ascii_downcase)
               ]
-            ' fields.json)
-            HAS_DONE=$(printf "%s" "$STATUS_OPTS_JSON" | jq 'index("done")')
+            ' fields.json || echo "[]")
+            [ -n "$STATUS_OPTS_JSON" ] || STATUS_OPTS_JSON="[]"
+            if ! printf "%s" "$STATUS_OPTS_JSON" | jq empty >/dev/null 2>&1; then
+              STATUS_OPTS_JSON="[]"
+            fi
+            HAS_DONE=$(printf "%s" "$STATUS_OPTS_JSON" | jq 'index("done")' 2>/dev/null || echo "null")
             if [ "$HAS_DONE" = "null" ]; then
               echo "No Status option matching Done — skip $KEY"
               echo "::endgroup::"
