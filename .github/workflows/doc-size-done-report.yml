@@ -59,7 +59,7 @@ jobs:
           fi
 
           printf '## Done cards: md/mdx size by assignee\n\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '|Project|Assignee|Files|Total (KB)|Total (bytes)|Share (%)|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|Project|Assignee|Files|Total (KB)|Total (bytes)|Share (%%)|\n' >> "$GITHUB_STEP_SUMMARY"
           printf '|-|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
 
           while read -r KEY; do
