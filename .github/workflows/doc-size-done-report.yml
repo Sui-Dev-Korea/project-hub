@@ -178,12 +178,11 @@ jobs:
               | (
                   [ .fields[]
                     | select(.__typename=="ProjectV2ItemFieldSingleSelectValue")
-                    | select((.field.name // "" | ascii_downcase) == "status")
                     | (.name // "" | gsub("^\\s+|\\s+$";"") | ascii_downcase)
-                  ][0] // ""
-                ) as $status
-              | select($status != "" and ($sopts | index($status)))
-              | select($status == "done")
+                    | select(. != "" and ($sopts | index(.)))
+                  ]
+                ) as $status_vals
+              | select(($status_vals | index("done")) != null)
               | (
                   [ .fields[]
                     | select(.__typename=="ProjectV2ItemFieldUserValue")
