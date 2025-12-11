@@ -59,8 +59,8 @@ jobs:
           fi
 
           printf '## Done cards: md/mdx size by assignee\n\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '|Project|Assignee|Files|Total (KB)|Total (bytes)|\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|Project|Assignee|Files|Total (KB)|Total (bytes)|Share (%)|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|-|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
 
           while read -r KEY; do
             [ -z "$KEY" ] && continue
@@ -135,7 +135,7 @@ jobs:
                         ... on Issue { title body url repository { nameWithOwner } }
                         ... on PullRequest { title body url repository { nameWithOwner } }
                       }
-                      fieldValues(first:50){
+                      fieldValues(first:100){
                         nodes{
                           __typename
                           ... on ProjectV2ItemFieldSingleSelectValue {
@@ -144,7 +144,7 @@ jobs:
                           }
                           ... on ProjectV2ItemFieldUserValue {
                             field { ... on ProjectV2Field { name } }
-                            users(first:10){ nodes{ login } }
+                            users(first:50){ nodes{ login } }
                           }
                         }
                       }
@@ -186,7 +186,6 @@ jobs:
               | (
                   [ .fields[]
                     | select(.__typename=="ProjectV2ItemFieldUserValue")
-                    | select((.field.name // "" | test("(?i)assignee")))
                     | (.users.nodes[]?.login // empty)
                   ] | unique
                 ) as $assignees
@@ -206,6 +205,9 @@ jobs:
               J=$(echo "$ROW" | base64 -d)
               TITLE=$(echo "$J" | jq -r '.title // ""' | tr '\r\n' ' ')
               BODY=$(echo "$J" | jq -r '.body // ""')
+              TYPE=$(echo "$J" | jq -r '.type // ""')
+              URL=$(echo "$J" | jq -r '.url // ""')
+              REPO=$(echo "$J" | jq -r '.repo // ""')
 
               LINK=$(printf "%s\n" "$BODY" | grep -Eo 'https://github.com/[^ )]+' | head -n1 || true)
               if [ -z "$LINK" ]; then
@@ -239,6 +241,22 @@ jobs:
               rm -f tmp.md
 
               mapfile -t ASSIGNEES < <(echo "$J" | jq -r '.assignees[]?')
+              # Fallback 1: Issue/PR assignees (API)
+              if [ ${#ASSIGNEES[@]} -eq 0 ] && { [ "$TYPE" = "Issue" ] || [ "$TYPE" = "PullRequest" ]; }; then
+                NUM=$(basename "$URL")
+                if [ -n "$NUM" ] && [ -n "$REPO" ]; then
+                  mapfile -t ASSIGNEES < <(gh api repos/"$REPO"/issues/"$NUM" --jq '.assignees[].login' 2>/dev/null || true)
+                fi
+              fi
+              # Fallback 2: Text field named like Assignee(s)
+              if [ ${#ASSIGNEES[@]} -eq 0 ]; then
+                mapfile -t ASSIGNEES < <(echo "$J" | jq -r '
+                  .fields[]?
+                  | select(.__typename=="ProjectV2ItemFieldTextValue")
+                  | select((.field.name // "" | test("(?i)assignee")))
+                  | (.text // "")
+                ' | tr '@' ' ' | tr ',' ' ' | tr '\n' ' ' | tr '\r' ' ' | tr ' ' '\n' | sed '/^$/d' | sort -u)
+              fi
               if [ ${#ASSIGNEES[@]} -eq 0 ]; then
                 ASSIGNEES=("unassigned")
               fi
@@ -254,16 +272,27 @@ jobs:
             done < items.b64
 
             if [ ${#P_BYTES[@]} -eq 0 ]; then
-              printf '|%s|%s|%s|%s|%s|\n' "$KEY" "-" "0" "0.0" "0" >> "$GITHUB_STEP_SUMMARY"
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "-" "0" "0.0" "0" "0.0" >> "$GITHUB_STEP_SUMMARY"
               echo "::endgroup::"
               continue
             fi
+
+            # Project totals
+            TOTAL_BYTES=0
+            TOTAL_FILES=0
+            for USER in "${!P_BYTES[@]}"; do
+              TOTAL_BYTES=$(( TOTAL_BYTES + ${P_BYTES[$USER]} ))
+              TOTAL_FILES=$(( TOTAL_FILES + ${P_FILES[$USER]} ))
+            done
+            TOTAL_KB=$(awk "BEGIN { printf \"%.1f\", $TOTAL_BYTES/1024 }")
+            printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "TOTAL" "$TOTAL_FILES" "$TOTAL_KB" "$TOTAL_BYTES" "100.0" >> "$GITHUB_STEP_SUMMARY"
 
             for USER in "${!P_BYTES[@]}"; do
               B=${P_BYTES[$USER]}
               F=${P_FILES[$USER]}
               KB=$(awk "BEGIN { printf \"%.1f\", $B/1024 }")
-              printf '|%s|%s|%s|%s|%s|\n' "$KEY" "$USER" "$F" "$KB" "$B" >> "$GITHUB_STEP_SUMMARY"
+              SHARE=$(awk "BEGIN { if ($TOTAL_BYTES==0) print \"0.0\"; else printf \"%.1f\", ($B*100)/$TOTAL_BYTES }")
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$GITHUB_STEP_SUMMARY"
             done
 
             echo "::endgroup::"
