@@ -6,12 +6,14 @@
     "parksol2004": 4,
     "guboc11": 5,
     "devan-ko": 4,
-    "daoauth": 4
+    "daoauth": 5,
+    "neonmintweb3": 1
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzgfYTME",
     "PVTI_lADODc3yn84BEdTSzgg4QBg",
     "PVTI_lADODc3yn84BEdTSzgg4TCg",
+    "PVTI_lADODc3yn84BEdTSzggF4l8",
     "PVTI_lADODc3yn84BEdTSzggGB8w",
     "PVTI_lADODc3yn84BEdTSzggGC3Q",
     "PVTI_lADODc3yn84BEdTSzggGCH4",
@@ -31,5 +33,5 @@
   ],
   "sprint": "2025-W46",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-12-25T16:44:28Z"
+  "last_run_at": "2025-12-26T06:50:10Z"
 }
