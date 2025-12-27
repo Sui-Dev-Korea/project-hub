@@ -202,7 +202,7 @@ jobs:
                     | (.users.nodes[]?.login // empty)
                   ] | unique
                 ) as $assignees
-              | {id, type, title, body, url, repo, assignees}
+              | {id, type, title, body, url, repo, assignees, fields}
               | @base64
             ' proj.json > items.b64
 
@@ -283,13 +283,34 @@ jobs:
                 P_FILES[$A]=$(( ${P_FILES[$A]:-0} + 1 ))
               done
 
-              # Reviewer stats: custom field (e.g. Reviewers(auto))
-              mapfile -t REVIEWERS < <(echo "$J" | jq -r '
-                .fields[]?
-                | select(.__typename=="ProjectV2ItemFieldTextValue")
-                | select((.field.name // "" | test("(?i)^reviewers\\(auto\\)\\s*$")))
-                | (.text // "")
-              ' | tr '\r\n' ' ' | sed 's/,/ /g' | tr '@' ' ' | tr ' ' '\n' | sed '/^$/d' | sort -u)
+              # Reviewer stats: custom field Reviewers(auto)
+              RV_RAW=$(
+                echo "$J" | jq -r '
+                  [
+                    .fields[]?
+                    | select(.__typename=="ProjectV2ItemFieldTextValue")
+                    | select((.field.name // "" | test("(?i)^reviewers\\s*\\(auto\\)\\s*$")))
+                    | (.text // "")
+                  ] | .[0] // ""
+                ' | tr -d '\r'
+              )
+              if printf "%s" "$RV_RAW" | grep -q '@'; then
+                mapfile -t REVIEWERS < <(
+                  printf "%s" "$RV_RAW" \
+                    | grep -Eo '@[A-Za-z0-9-]+' \
+                    | sed 's/^@//' \
+                    | sort -u
+                )
+              else
+                mapfile -t REVIEWERS < <(
+                  printf "%s" "$RV_RAW" \
+                    | tr ',\n\t' ' ' \
+                    | tr -s ' ' '\n' \
+                    | sed 's/^@//' \
+                    | grep -E '^[A-Za-z0-9-]+$' \
+                    | sort -u
+                )
+              fi
 
               if [ ${#REVIEWERS[@]} -eq 0 ]; then
                 REVIEWERS=("no-reviewer")
