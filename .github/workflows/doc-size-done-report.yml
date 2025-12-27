@@ -58,6 +58,11 @@ jobs:
             exit 0
           fi
 
+          ASSIGNEE_ROWS="$(mktemp)"
+          REVIEWER_ROWS="$(mktemp)"
+          cleanup() { rm -f "$ASSIGNEE_ROWS" "$REVIEWER_ROWS"; }
+          trap cleanup EXIT
+
           printf '## Done cards: md/mdx size by assignee\n\n' >> "$GITHUB_STEP_SUMMARY"
           printf '|Project|Assignee|Files|Total (KB)|Total (bytes)|Share (%%)|\n' >> "$GITHUB_STEP_SUMMARY"
           printf '|-|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
@@ -199,6 +204,8 @@ jobs:
 
             declare -A P_BYTES=()
             declare -A P_FILES=()
+            declare -A R_BYTES=()
+            declare -A R_FILES=()
 
             if [ ! -s items.b64 ]; then
               echo "No Done items found — $KEY"
@@ -272,32 +279,80 @@ jobs:
                 P_FILES[$A]=$(( ${P_FILES[$A]:-0} + 1 ))
               done
 
+              # Reviewer stats: unique review authors for PRs
+              if [ "$TYPE" = "PullRequest" ] && [ -n "$URL" ] && [ -n "$REPO" ]; then
+                NUM=$(basename "$URL")
+                if [ -n "$NUM" ]; then
+                  mapfile -t REVIEWERS < <(
+                    gh api repos/"$REPO"/pulls/"$NUM"/reviews --paginate --jq '.[].user.login' 2>/dev/null \
+                      | tr -d '\r' | sed '/^$/d' | sort -u || true
+                  )
+                  if [ ${#REVIEWERS[@]} -eq 0 ]; then
+                    REVIEWERS=("no-reviews")
+                  fi
+                  for R in "${REVIEWERS[@]}"; do
+                    R=$(printf "%s" "$R" | tr -d '\r\n' | sed 's/^@//')
+                    [ -z "$R" ] && continue
+                    R_BYTES[$R]=$(( ${R_BYTES[$R]:-0} + BYTES ))
+                    R_FILES[$R]=$(( ${R_FILES[$R]:-0} + 1 ))
+                  done
+                fi
+              fi
+
               echo "Done :: $TITLE | $FILE_NAME | bytes=$BYTES | assignee(s)=$(printf "%s" "${ASSIGNEES[*]}")"
             done < items.b64
 
             if [ ${#P_BYTES[@]} -eq 0 ]; then
-              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "-" "0" "0.0" "0" "0.0" >> "$GITHUB_STEP_SUMMARY"
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "-" "0" "0.0" "0" "0.0" >> "$ASSIGNEE_ROWS"
+            else
+              # Project totals
+              TOTAL_BYTES=0
+              TOTAL_FILES=0
+              for USER in "${!P_BYTES[@]}"; do
+                TOTAL_BYTES=$(( TOTAL_BYTES + ${P_BYTES[$USER]} ))
+                TOTAL_FILES=$(( TOTAL_FILES + ${P_FILES[$USER]} ))
+              done
+              TOTAL_KB=$(awk "BEGIN { printf \"%.1f\", $TOTAL_BYTES/1024 }")
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "TOTAL" "$TOTAL_FILES" "$TOTAL_KB" "$TOTAL_BYTES" "100.0" >> "$ASSIGNEE_ROWS"
+
+              for USER in "${!P_BYTES[@]}"; do
+                B=${P_BYTES[$USER]}
+                F=${P_FILES[$USER]}
+                KB=$(awk "BEGIN { printf \"%.1f\", $B/1024 }")
+                SHARE=$(awk "BEGIN { if ($TOTAL_BYTES==0) print \"0.0\"; else printf \"%.1f\", ($B*100)/$TOTAL_BYTES }")
+                printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$ASSIGNEE_ROWS"
+              done
+            fi
+
+            if [ ${#R_BYTES[@]} -eq 0 ]; then
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "-" "0" "0.0" "0" "0.0" >> "$REVIEWER_ROWS"
               echo "::endgroup::"
               continue
             fi
 
-            # Project totals
-            TOTAL_BYTES=0
-            TOTAL_FILES=0
-            for USER in "${!P_BYTES[@]}"; do
-              TOTAL_BYTES=$(( TOTAL_BYTES + ${P_BYTES[$USER]} ))
-              TOTAL_FILES=$(( TOTAL_FILES + ${P_FILES[$USER]} ))
+            R_TOTAL_BYTES=0
+            R_TOTAL_FILES=0
+            for USER in "${!R_BYTES[@]}"; do
+              R_TOTAL_BYTES=$(( R_TOTAL_BYTES + ${R_BYTES[$USER]} ))
+              R_TOTAL_FILES=$(( R_TOTAL_FILES + ${R_FILES[$USER]} ))
             done
-            TOTAL_KB=$(awk "BEGIN { printf \"%.1f\", $TOTAL_BYTES/1024 }")
-            printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "TOTAL" "$TOTAL_FILES" "$TOTAL_KB" "$TOTAL_BYTES" "100.0" >> "$GITHUB_STEP_SUMMARY"
+            R_TOTAL_KB=$(awk "BEGIN { printf \"%.1f\", $R_TOTAL_BYTES/1024 }")
+            printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "TOTAL" "$R_TOTAL_FILES" "$R_TOTAL_KB" "$R_TOTAL_BYTES" "100.0" >> "$REVIEWER_ROWS"
 
-            for USER in "${!P_BYTES[@]}"; do
-              B=${P_BYTES[$USER]}
-              F=${P_FILES[$USER]}
+            for USER in "${!R_BYTES[@]}"; do
+              B=${R_BYTES[$USER]}
+              F=${R_FILES[$USER]}
               KB=$(awk "BEGIN { printf \"%.1f\", $B/1024 }")
-              SHARE=$(awk "BEGIN { if ($TOTAL_BYTES==0) print \"0.0\"; else printf \"%.1f\", ($B*100)/$TOTAL_BYTES }")
-              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$GITHUB_STEP_SUMMARY"
+              SHARE=$(awk "BEGIN { if ($R_TOTAL_BYTES==0) print \"0.0\"; else printf \"%.1f\", ($B*100)/$R_TOTAL_BYTES }")
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$REVIEWER_ROWS"
             done
 
             echo "::endgroup::"
           done < projects.txt
+
+          cat "$ASSIGNEE_ROWS" >> "$GITHUB_STEP_SUMMARY"
+
+          printf '\n## Done cards: md/mdx size by reviewer (PR reviews)\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|Project|Reviewer|Files|Total (KB)|Total (bytes)|Share (%%)|\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '|-|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
+          cat "$REVIEWER_ROWS" >> "$GITHUB_STEP_SUMMARY"
