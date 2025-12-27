@@ -151,6 +151,10 @@ jobs:
                             name
                             field { ... on ProjectV2Field { name } }
                           }
+                          ... on ProjectV2ItemFieldTextValue {
+                            text
+                            field { ... on ProjectV2Field { name } }
+                          }
                           ... on ProjectV2ItemFieldUserValue {
                             field { ... on ProjectV2Field { name } }
                             users(first:50){ nodes{ login } }
@@ -279,25 +283,23 @@ jobs:
                 P_FILES[$A]=$(( ${P_FILES[$A]:-0} + 1 ))
               done
 
-              # Reviewer stats: unique review authors for PRs
-              if [ "$TYPE" = "PullRequest" ] && [ -n "$URL" ] && [ -n "$REPO" ]; then
-                NUM=$(basename "$URL")
-                if [ -n "$NUM" ]; then
-                  mapfile -t REVIEWERS < <(
-                    gh api repos/"$REPO"/pulls/"$NUM"/reviews --paginate --jq '.[].user.login' 2>/dev/null \
-                      | tr -d '\r' | sed '/^$/d' | sort -u || true
-                  )
-                  if [ ${#REVIEWERS[@]} -eq 0 ]; then
-                    REVIEWERS=("no-reviews")
-                  fi
-                  for R in "${REVIEWERS[@]}"; do
-                    R=$(printf "%s" "$R" | tr -d '\r\n' | sed 's/^@//')
-                    [ -z "$R" ] && continue
-                    R_BYTES[$R]=$(( ${R_BYTES[$R]:-0} + BYTES ))
-                    R_FILES[$R]=$(( ${R_FILES[$R]:-0} + 1 ))
-                  done
-                fi
+              # Reviewer stats: custom field (e.g. Reviewers(auto))
+              mapfile -t REVIEWERS < <(echo "$J" | jq -r '
+                .fields[]?
+                | select(.__typename=="ProjectV2ItemFieldTextValue")
+                | select((.field.name // "" | test("(?i)^reviewers\\(auto\\)\\s*$")))
+                | (.text // "")
+              ' | tr '\r\n' ' ' | sed 's/,/ /g' | tr '@' ' ' | tr ' ' '\n' | sed '/^$/d' | sort -u)
+
+              if [ ${#REVIEWERS[@]} -eq 0 ]; then
+                REVIEWERS=("no-reviewer")
               fi
+              for R in "${REVIEWERS[@]}"; do
+                R=$(printf "%s" "$R" | tr -d '\r\n' | sed 's/^@//')
+                [ -z "$R" ] && continue
+                R_BYTES[$R]=$(( ${R_BYTES[$R]:-0} + BYTES ))
+                R_FILES[$R]=$(( ${R_FILES[$R]:-0} + 1 ))
+              done
 
               echo "Done :: $TITLE | $FILE_NAME | bytes=$BYTES | assignee(s)=$(printf "%s" "${ASSIGNEES[*]}")"
             done < items.b64
@@ -352,7 +354,7 @@ jobs:
 
           cat "$ASSIGNEE_ROWS" >> "$GITHUB_STEP_SUMMARY"
 
-          printf '\n## Done cards: md/mdx size by reviewer (PR reviews)\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '\n## Done cards: md/mdx size by reviewer (custom field)\n\n' >> "$GITHUB_STEP_SUMMARY"
           printf '|Project|Reviewer|Files|Total (KB)|Total (bytes)|Share (%%)|\n' >> "$GITHUB_STEP_SUMMARY"
           printf '|-|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
           cat "$REVIEWER_ROWS" >> "$GITHUB_STEP_SUMMARY"
