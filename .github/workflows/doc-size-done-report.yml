@@ -338,13 +338,14 @@ jobs:
               TOTAL_KB=$(awk "BEGIN { printf \"%.1f\", $TOTAL_BYTES/1024 }")
               printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "TOTAL" "$TOTAL_FILES" "$TOTAL_KB" "$TOTAL_BYTES" "100.0" >> "$ASSIGNEE_ROWS"
 
-              for USER in "${!P_BYTES[@]}"; do
+              while read -r USER; do
+                [ -z "$USER" ] && continue
                 B=${P_BYTES[$USER]}
                 F=${P_FILES[$USER]}
                 KB=$(awk "BEGIN { printf \"%.1f\", $B/1024 }")
                 SHARE=$(awk "BEGIN { if ($TOTAL_BYTES==0) print \"0.0\"; else printf \"%.1f\", ($B*100)/$TOTAL_BYTES }")
                 printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$ASSIGNEE_ROWS"
-              done
+              done < <(printf "%s\n" "${!P_BYTES[@]}" | LC_ALL=C sort)
             fi
 
             if [ ${#R_BYTES[@]} -eq 0 ]; then
@@ -354,21 +355,18 @@ jobs:
             fi
 
             R_TOTAL_BYTES=0
-            R_TOTAL_FILES=0
             for USER in "${!R_BYTES[@]}"; do
               R_TOTAL_BYTES=$(( R_TOTAL_BYTES + ${R_BYTES[$USER]} ))
-              R_TOTAL_FILES=$(( R_TOTAL_FILES + ${R_FILES[$USER]} ))
             done
-            R_TOTAL_KB=$(awk "BEGIN { printf \"%.1f\", $R_TOTAL_BYTES/1024 }")
-            printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "TOTAL" "$R_TOTAL_FILES" "$R_TOTAL_KB" "$R_TOTAL_BYTES" "100.0" >> "$REVIEWER_ROWS"
 
-            for USER in "${!R_BYTES[@]}"; do
+            while read -r USER; do
+              [ -z "$USER" ] && continue
               B=${R_BYTES[$USER]}
               F=${R_FILES[$USER]}
               KB=$(awk "BEGIN { printf \"%.1f\", $B/1024 }")
               SHARE=$(awk "BEGIN { if ($R_TOTAL_BYTES==0) print \"0.0\"; else printf \"%.1f\", ($B*100)/$R_TOTAL_BYTES }")
               printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$REVIEWER_ROWS"
-            done
+            done < <(printf "%s\n" "${!R_BYTES[@]}" | LC_ALL=C sort)
 
             echo "::endgroup::"
           done < projects.txt
