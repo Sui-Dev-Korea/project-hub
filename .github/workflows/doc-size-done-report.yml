@@ -60,12 +60,10 @@ jobs:
 
           ASSIGNEE_ROWS="$(mktemp)"
           REVIEWER_ROWS="$(mktemp)"
-          cleanup() { rm -f "$ASSIGNEE_ROWS" "$REVIEWER_ROWS"; }
+          PROGRESS_ROWS="$(mktemp)"
+          SUMMARY_OUT="$(mktemp)"
+          cleanup() { rm -f "$ASSIGNEE_ROWS" "$REVIEWER_ROWS" "$PROGRESS_ROWS" "$SUMMARY_OUT"; }
           trap cleanup EXIT
-
-          printf '## Done cards: md/mdx size by assignee\n\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '|Progress|Project|Assignee|Files|Total (KB)|Total (bytes)|Share (%%)|\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '|-|-|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
 
           SUI_TOTAL_DOC_BYTES=""
 
@@ -336,7 +334,6 @@ jobs:
               echo "Done :: $TITLE | $FILE_NAME | bytes=$BYTES | assignee(s)=$(printf "%s" "${ASSIGNEES[*]}")"
             done < items.b64
 
-            PROGRESS="-"
             if [ "$KEY" = "sui" ]; then
               if [ -z "${SUI_TOTAL_DOC_BYTES}" ]; then
                 rm -rf _docs_repo_sui
@@ -358,12 +355,15 @@ jobs:
                 rm -rf _docs_repo_sui
               fi
               if [ -n "${SUI_TOTAL_DOC_BYTES}" ] && [ "${SUI_TOTAL_DOC_BYTES}" -gt 0 ] 2>/dev/null; then
+                DONE_KB=$(awk "BEGIN { printf \"%.1f\", $DONE_UNIQ_BYTES/1024 }")
+                TOTAL_KB=$(awk "BEGIN { printf \"%.1f\", $SUI_TOTAL_DOC_BYTES/1024 }")
                 PROGRESS=$(awk "BEGIN { printf \"%.1f%%\", ($DONE_UNIQ_BYTES*100)/$SUI_TOTAL_DOC_BYTES }")
+                printf '|%s|%s / %s|%s|\n' "$KEY" "$DONE_KB" "$TOTAL_KB" "$PROGRESS" >> "$PROGRESS_ROWS"
               fi
             fi
 
             if [ ${#P_BYTES[@]} -eq 0 ]; then
-              printf '|%s|%s|%s|%s|%s|%s|%s|\n' "$PROGRESS" "$KEY" "-" "0" "0.0" "0" "0.0" >> "$ASSIGNEE_ROWS"
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "-" "0" "0.0" "0" "0.0" >> "$ASSIGNEE_ROWS"
             else
               # Project totals
               TOTAL_BYTES=0
@@ -373,7 +373,7 @@ jobs:
                 TOTAL_FILES=$(( TOTAL_FILES + ${P_FILES[$USER]} ))
               done
               TOTAL_KB=$(awk "BEGIN { printf \"%.1f\", $TOTAL_BYTES/1024 }")
-              printf '|%s|%s|%s|%s|%s|%s|%s|\n' "$PROGRESS" "$KEY" "TOTAL" "$TOTAL_FILES" "$TOTAL_KB" "$TOTAL_BYTES" "100.0" >> "$ASSIGNEE_ROWS"
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "TOTAL" "$TOTAL_FILES" "$TOTAL_KB" "$TOTAL_BYTES" "100.0" >> "$ASSIGNEE_ROWS"
 
               while read -r USER; do
                 [ -z "$USER" ] && continue
@@ -381,12 +381,12 @@ jobs:
                 F=${P_FILES[$USER]}
                 KB=$(awk "BEGIN { printf \"%.1f\", $B/1024 }")
                 SHARE=$(awk "BEGIN { if ($TOTAL_BYTES==0) print \"0.0\"; else printf \"%.1f\", ($B*100)/$TOTAL_BYTES }")
-                printf '|%s|%s|%s|%s|%s|%s|%s|\n' "$PROGRESS" "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$ASSIGNEE_ROWS"
+                printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$ASSIGNEE_ROWS"
               done < <(printf "%s\n" "${!P_BYTES[@]}" | LC_ALL=C sort)
             fi
 
             if [ ${#R_BYTES[@]} -eq 0 ]; then
-              printf '|%s|%s|%s|%s|%s|%s|%s|\n' "$PROGRESS" "$KEY" "-" "0" "0.0" "0" "0.0" >> "$REVIEWER_ROWS"
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "-" "0" "0.0" "0" "0.0" >> "$REVIEWER_ROWS"
               echo "::endgroup::"
               continue
             fi
@@ -402,15 +402,28 @@ jobs:
               F=${R_FILES[$USER]}
               KB=$(awk "BEGIN { printf \"%.1f\", $B/1024 }")
               SHARE=$(awk "BEGIN { if ($R_TOTAL_BYTES==0) print \"0.0\"; else printf \"%.1f\", ($B*100)/$R_TOTAL_BYTES }")
-              printf '|%s|%s|%s|%s|%s|%s|%s|\n' "$PROGRESS" "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$REVIEWER_ROWS"
+              printf '|%s|%s|%s|%s|%s|%s|\n' "$KEY" "$USER" "$F" "$KB" "$B" "$SHARE" >> "$REVIEWER_ROWS"
             done < <(printf "%s\n" "${!R_BYTES[@]}" | LC_ALL=C sort)
 
             echo "::endgroup::"
           done < projects.txt
 
-          cat "$ASSIGNEE_ROWS" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s "$PROGRESS_ROWS" ]; then
+            printf '## Progress\n\n' >> "$SUMMARY_OUT"
+            printf '|Project|Done/Total (KB)|Progress|\n' >> "$SUMMARY_OUT"
+            printf '|-|-|-|\n' >> "$SUMMARY_OUT"
+            cat "$PROGRESS_ROWS" >> "$SUMMARY_OUT"
+            printf '\n' >> "$SUMMARY_OUT"
+          fi
 
-          printf '\n## Done cards: md/mdx size by reviewer (custom field)\n\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '|Progress|Project|Reviewer|Files|Total (KB)|Total (bytes)|Share (%%)|\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '|-|-|-|-|-|-|-|\n' >> "$GITHUB_STEP_SUMMARY"
-          cat "$REVIEWER_ROWS" >> "$GITHUB_STEP_SUMMARY"
+          printf '## Done cards: md/mdx size by assignee\n\n' >> "$SUMMARY_OUT"
+          printf '|Project|Assignee|Files|Total (KB)|Total (bytes)|Share (%%)|\n' >> "$SUMMARY_OUT"
+          printf '|-|-|-|-|-|-|\n' >> "$SUMMARY_OUT"
+          cat "$ASSIGNEE_ROWS" >> "$SUMMARY_OUT"
+
+          printf '\n## Done cards: md/mdx size by reviewer (custom field)\n\n' >> "$SUMMARY_OUT"
+          printf '|Project|Reviewer|Files|Total (KB)|Total (bytes)|Share (%%)|\n' >> "$SUMMARY_OUT"
+          printf '|-|-|-|-|-|-|\n' >> "$SUMMARY_OUT"
+          cat "$REVIEWER_ROWS" >> "$SUMMARY_OUT"
+
+          cat "$SUMMARY_OUT" >> "$GITHUB_STEP_SUMMARY"
