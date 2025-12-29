@@ -1,37 +1,12 @@
 {
   "quota_usage": {
-    "jade653": 4,
-    "gkfyr": 5,
-    "roode1017": 5,
-    "parksol2004": 4,
-    "guboc11": 5,
-    "devan-ko": 4,
-    "daoauth": 5,
-    "neonmintweb3": 1
+    "jade653": 1,
+    "devan-ko": 1
   },
   "processed_card_ids": [
-    "PVTI_lADODc3yn84BEdTSzgfYTME",
-    "PVTI_lADODc3yn84BEdTSzgg4QBg",
-    "PVTI_lADODc3yn84BEdTSzgg4TCg",
-    "PVTI_lADODc3yn84BEdTSzggF4l8",
-    "PVTI_lADODc3yn84BEdTSzggGB8w",
-    "PVTI_lADODc3yn84BEdTSzggGC3Q",
-    "PVTI_lADODc3yn84BEdTSzggGCH4",
-    "PVTI_lADODc3yn84BEdTSzggGCLU",
-    "PVTI_lADODc3yn84BEdTSzgi-keI",
-    "PVTI_lADODc3yn84BEdTSzgi-klM",
-    "PVTI_lADODc3yn84BEdTSzgi-krE",
-    "PVTI_lADODc3yn84BEdTSzgiXRtc",
-    "PVTI_lADODc3yn84BEdTSzgiXWcE",
-    "PVTI_lADODc3yn84BEdTSzgiXX5s",
-    "PVTI_lADODc3yn84BEdTSzgiXY8c",
-    "PVTI_lADODc3yn84BEdTSzgiXdds",
-    "PVTI_lADODc3yn84BEdTSzgiXeas",
-    "PVTI_lADODc3yn84BEdTSzgiXgFg",
-    "PVTI_lADODc3yn84BEdTSzgiYJ5s",
-    "PVTI_lADODc3yn84BEdTSzgiYJvU"
+    "PVTI_lADODc3yn84BEdTSzggF4x8"
   ],
-  "sprint": "2025-W48",
+  "sprint": "2025-W46",
   "quota_per_sprint": 8,
-  "last_run_at": "2025-12-26T06:50:10Z"
+  "last_run_at": "2025-12-29T13:47:48Z"
 }
