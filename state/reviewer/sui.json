@@ -5,14 +5,17 @@
     "lloes098": 1,
     "devan-ko": 1,
     "daoauth": 1,
-    "parksol2004": 1
+    "parksol2004": 1,
+    "dolf3131": 1,
+    "guboc11": 1
   },
   "processed_card_ids": [
+    "PVTI_lADODc3yn84BEdTSzgg4PWo",
     "PVTI_lADODc3yn84BEdTSzggGB1Y",
     "PVTI_lADODc3yn84BEdTSzggGC0c",
     "PVTI_lADODc3yn84BEdTSzgjDRD0"
   ],
   "sprint": "2026-W01",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-01-06T15:58:35Z"
+  "last_run_at": "2026-01-06T19:34:30Z"
 }
