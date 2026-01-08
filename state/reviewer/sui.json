@@ -9,9 +9,11 @@
     "dolf3131": 1,
     "guboc11": 1,
     "neonmintweb3": 1,
-    "roode1017": 1
+    "roode1017": 2,
+    "Harrycho415": 1
   },
   "processed_card_ids": [
+    "PVTI_lADODc3yn84BEdTSzgg4P6Y",
     "PVTI_lADODc3yn84BEdTSzgg4PWo",
     "PVTI_lADODc3yn84BEdTSzggGB1Y",
     "PVTI_lADODc3yn84BEdTSzggGC0c",
@@ -20,5 +22,5 @@
   ],
   "sprint": "2026-W01",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-01-08T03:54:52Z"
+  "last_run_at": "2026-01-08T06:59:40Z"
 }
