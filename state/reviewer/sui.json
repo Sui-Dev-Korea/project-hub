@@ -1,8 +1,8 @@
 {
   "quota_usage": {
     "jade653": 1,
-    "gkfyr": 1,
-    "lloes098": 1,
+    "gkfyr": 2,
+    "lloes098": 2,
     "devan-ko": 1,
     "daoauth": 1,
     "parksol2004": 1,
@@ -16,11 +16,12 @@
     "PVTI_lADODc3yn84BEdTSzgg4P6Y",
     "PVTI_lADODc3yn84BEdTSzgg4PWo",
     "PVTI_lADODc3yn84BEdTSzggGB1Y",
+    "PVTI_lADODc3yn84BEdTSzggGBcw",
     "PVTI_lADODc3yn84BEdTSzggGC0c",
     "PVTI_lADODc3yn84BEdTSzgjDRD0",
     "PVTI_lADODc3yn84BEdTSzgjGrh8"
   ],
   "sprint": "2026-W01",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-01-08T06:59:40Z"
+  "last_run_at": "2026-01-08T08:18:25Z"
 }
