@@ -6,8 +6,8 @@
     "devan-ko": 2,
     "daoauth": 3,
     "parksol2004": 2,
-    "dolf3131": 2,
-    "guboc11": 2,
+    "dolf3131": 3,
+    "guboc11": 3,
     "neonmintweb3": 3,
     "roode1017": 2,
     "Harrycho415": 2
@@ -17,6 +17,7 @@
     "PVTI_lADODc3yn84BEdTSzgg4P6Y",
     "PVTI_lADODc3yn84BEdTSzgg4PWo",
     "PVTI_lADODc3yn84BEdTSzgg4S2M",
+    "PVTI_lADODc3yn84BEdTSzgg4Sf8",
     "PVTI_lADODc3yn84BEdTSzggGB1Y",
     "PVTI_lADODc3yn84BEdTSzggGBQA",
     "PVTI_lADODc3yn84BEdTSzggGBcw",
@@ -29,5 +30,5 @@
   ],
   "sprint": "2026-W01",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-01-13T05:43:35Z"
+  "last_run_at": "2026-01-13T05:55:32Z"
 }
