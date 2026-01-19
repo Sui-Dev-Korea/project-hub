@@ -1,7 +1,15 @@
 {
-  "quota_usage": {},
-  "processed_card_ids": [],
+  "quota_usage": {
+    "parksol2004": 1,
+    "Harrycho415": 1,
+    "devan-ko": 1,
+    "jade653": 1
+  },
+  "processed_card_ids": [
+    "PVTI_lADODc3yn84BEdTSzgjGrKY",
+    "PVTI_lADODc3yn84BEdTSzgjGrRA"
+  ],
   "sprint": "2026-W03",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-01-18T23:55:18Z"
+  "last_run_at": "2026-01-19T10:38:07Z"
 }
