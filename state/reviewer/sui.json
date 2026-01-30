@@ -7,10 +7,10 @@
     "lloes098": 7,
     "roode1017": 7,
     "dolf3131": 7,
-    "guboc11": 7,
+    "guboc11": 8,
     "daoauth": 7,
     "gkfyr": 7,
-    "neonmintweb3": 2
+    "neonmintweb3": 3
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzggGBVA",
@@ -39,6 +39,7 @@
     "PVTI_lADODc3yn84BEdTSzgj9znk",
     "PVTI_lADODc3yn84BEdTSzgjDREI",
     "PVTI_lADODc3yn84BEdTSzgjDROk",
+    "PVTI_lADODc3yn84BEdTSzgjDRYI",
     "PVTI_lADODc3yn84BEdTSzgjGrKY",
     "PVTI_lADODc3yn84BEdTSzgjGrRA",
     "PVTI_lADODc3yn84BEdTSzgkC2Os",
@@ -53,5 +54,5 @@
   ],
   "sprint": "2026-W03",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-01-23T05:02:08Z"
+  "last_run_at": "2026-01-30T14:47:26Z"
 }
