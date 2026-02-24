@@ -6,16 +6,18 @@
     "dolf3131": 3,
     "lloes098": 2,
     "parksol2004": 3,
-    "devan-ko": 2,
-    "guboc11": 2,
-    "Harrycho415": 2,
-    "roode1017": 2
+    "devan-ko": 3,
+    "guboc11": 3,
+    "Harrycho415": 3,
+    "roode1017": 3
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzggF4sc",
     "PVTI_lADODc3yn84BEdTSzgjDDF4",
     "PVTI_lADODc3yn84BEdTSzgjDRi4",
+    "PVTI_lADODc3yn84BEdTSzglcIK8",
     "PVTI_lADODc3yn84BEdTSzglcIKQ",
+    "PVTI_lADODc3yn84BEdTSzglcIKs",
     "PVTI_lADODc3yn84BEdTSzglcILA",
     "PVTI_lADODc3yn84BEdTSzglcILI",
     "PVTI_lADODc3yn84BEdTSzglcJC0",
@@ -26,5 +28,5 @@
   ],
   "sprint": "2026-W08",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-02-24T04:44:24Z"
+  "last_run_at": "2026-02-24T05:46:56Z"
 }
