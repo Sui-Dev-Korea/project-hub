@@ -1,16 +1,16 @@
 {
   "quota_usage": {
-    "gkfyr": 3,
+    "gkfyr": 4,
     "jade653": 2,
-    "neonmintweb3": 2,
+    "neonmintweb3": 3,
     "dolf3131": 3,
-    "lloes098": 2,
+    "lloes098": 3,
     "parksol2004": 3,
-    "devan-ko": 3,
+    "devan-ko": 4,
     "guboc11": 3,
     "Harrycho415": 3,
     "roode1017": 3,
-    "daoauth": 1
+    "daoauth": 3
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzggF4sc",
@@ -25,10 +25,13 @@
     "PVTI_lADODc3yn84BEdTSzglcJDQ",
     "PVTI_lADODc3yn84BEdTSzglcJDc",
     "PVTI_lADODc3yn84BEdTSzglcJEM",
+    "PVTI_lADODc3yn84BEdTSzglcKDU",
+    "PVTI_lADODc3yn84BEdTSzglcKDo",
+    "PVTI_lADODc3yn84BEdTSzglcKDs",
     "PVTI_lADODc3yn84BEdTSzglcKSY",
     "PVTI_lADODc3yn84BEdTSzglcKSw"
   ],
   "sprint": "2026-W08",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-02-24T10:08:30Z"
+  "last_run_at": "2026-02-24T13:52:08Z"
 }
