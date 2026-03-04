@@ -3,13 +3,16 @@
     "dolf3131": 1,
     "jade653": 1,
     "Harrycho415": 1,
-    "devan-ko": 1
+    "devan-ko": 1,
+    "lloes098": 1,
+    "neonmintweb3": 1
   },
   "processed_card_ids": [
+    "PVTI_lADODc3yn84BEdTSzgjDRYQ",
     "PVTI_lADODc3yn84BEdTSzgjDRyo",
     "PVTI_lADODc3yn84BEdTSzglC6vw"
   ],
   "sprint": "2026-W09",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-03-04T05:38:27Z"
+  "last_run_at": "2026-03-04T07:10:48Z"
 }
