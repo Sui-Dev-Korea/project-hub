@@ -7,15 +7,18 @@
     "lloes098": 1,
     "neonmintweb3": 1,
     "gkfyr": 1,
-    "guboc11": 1
+    "guboc11": 1,
+    "roode1017": 1,
+    "daoauth": 1
   },
   "processed_card_ids": [
     "PVTI_lADODc3yn84BEdTSzgjDREQ",
     "PVTI_lADODc3yn84BEdTSzgjDRYQ",
     "PVTI_lADODc3yn84BEdTSzgjDRyo",
-    "PVTI_lADODc3yn84BEdTSzglC6vw"
+    "PVTI_lADODc3yn84BEdTSzglC6vw",
+    "PVTI_lADODc3yn84BEdTSzglcKDw"
   ],
   "sprint": "2026-W09",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-03-06T15:22:17Z"
+  "last_run_at": "2026-03-06T23:15:13Z"
 }
