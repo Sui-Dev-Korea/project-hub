@@ -1,9 +1,9 @@
 {
   "quota_usage": {
     "dolf3131": 2,
-    "jade653": 1,
+    "jade653": 2,
     "Harrycho415": 1,
-    "devan-ko": 1,
+    "devan-ko": 2,
     "lloes098": 2,
     "neonmintweb3": 2,
     "gkfyr": 2,
@@ -17,6 +17,7 @@
     "PVTI_lADODc3yn84BEdTSzgjDRYQ",
     "PVTI_lADODc3yn84BEdTSzgjDRYg",
     "PVTI_lADODc3yn84BEdTSzgjDRyo",
+    "PVTI_lADODc3yn84BEdTSzglC6vk",
     "PVTI_lADODc3yn84BEdTSzglC6vw",
     "PVTI_lADODc3yn84BEdTSzglcKDw",
     "PVTI_lADODc3yn84BEdTSzglcKSc",
@@ -24,5 +25,5 @@
   ],
   "sprint": "2026-W09",
   "quota_per_sprint": 8,
-  "last_run_at": "2026-03-07T14:58:02Z"
+  "last_run_at": "2026-03-07T15:54:49Z"
 }
